@@ -172,7 +172,8 @@ def response_http(code, phrase=None, version=None, headers=None,
     if not phrase: phrase = DEFAULT_PAGES[code][0]
     if not version: version = 'HTTP/1.1'
     res = HttpResponse(version, code, phrase)
-    if body: res.set_header('content-length', str(len(body)))
+    if body and isinstance(body, basestring):
+        res.set_header('content-length', str(len(body)))
     if headers:
         for k, v in headers: res.set_header(k, v)
     res.cache = cache
