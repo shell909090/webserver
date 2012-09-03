@@ -140,6 +140,9 @@ class HttpResponse(HttpMessage):
     def __init__(self, version, code, phrase):
         HttpMessage.__init__(self)
         self.version, self.code, self.phrase = version, int(code), phrase
+        self.connection, self.cache = False, 0
+
+    def __nonzero__(self): return self.connection
 
     def get_startline(self):
         return ' '.join((self.version, str(self.code), self.phrase))
@@ -164,13 +167,14 @@ def recv_msg(stream, cls):
     msg.recv_header(stream)
     return msg
 
-def response_http(stream, code, phrase=None, version=None, headers=None, body=None):
+def response_http(code, phrase=None, version=None, headers=None,
+                  cache=0, body=None):
     if not phrase: phrase = DEFAULT_PAGES[code][0]
     if not version: version = 'HTTP/1.1'
     res = HttpResponse(version, code, phrase)
     if body: res.set_header('content-length', str(len(body)))
     if headers:
         for k, v in headers: res.set_header(k, v)
-    res.sendto(stream)
-    if body: stream.write(body)
-    stream.flush()
+    res.cache = cache
+    res.body = body
+    return res

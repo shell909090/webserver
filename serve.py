@@ -5,9 +5,10 @@
 @author: shell.xu
 '''
 import logging
+import app
 from http import *
 # from os import path
-# from urlparse import urlparse
+from urlparse import urlparse
 # from contextlib import contextmanager
 from gevent import pool, socket, dns
 
@@ -26,19 +27,28 @@ def initlog(lv, logfile=None):
 
 logger = logging.getLogger('server')
 
-def handler(req, stream):
-    print req.method, req.uri, req.version
-    response_http(stream, 200, body='ok')
-
 class WebServer(object):
 
-    def __init__(self, addr, handler, poolsize=10000):
+    def __init__(self, addr, dis, poolsize=10000):
         self.addr = addr
         self.pool = pool.Pool(poolsize)
-        self.handler = handler
+        self.dis = dis
         self.init()
 
-    def init(self): initlog('INFO', None)
+    def init(self):
+        initlog('INFO', None)
+        logger.info('WebServer started at %s' % str(self.addr))
+
+    def handler(self, req, stream):
+        req.url = urlparse(req.uri)
+        logger.info('%s %s' % (req.method, req.uri.split('?', 1)[0]))
+        res = self.dis(req, stream)
+        logger.info('%s %s' % (res.code, res.phrase))
+        res.sendto(stream)
+        if callable(res.body):
+            for d in res.body(): stream.write(d)
+        else: stream.write(res.body)
+        return res
 
     def sockloop(self, sock, addr):
         stream = sock.makefile()
@@ -52,15 +62,33 @@ class WebServer(object):
 
     def serve_forever(self):
         listensock = socket.socket()
-        listensock.bind(self.addr)
         listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listensock.bind(self.addr)
         listensock.listen(5)
         while True:
             sock, addr = listensock.accept()
             self.pool.spawn(self.sockloop, sock, addr)
 
+def url_test(req, stream):
+    print 'test params:', req.url_param
+    return response_http(200, 'ok', body='test')
+
+def url_main(req, stream):
+    count = req.session.get('count', 0)
+    print 'main url count: %d' % count
+    print 'main url match:', req.url_match
+    req.session['count'] = count + 1
+    return response_http(200, 'ok', cache=100, body='main')
+
 def main():
-    ws = WebServer(('', 8080), handler)
+    dis = app.Dispatch((
+        ('/test/(.*)', url_test),
+        ('/test1/(.*)', url_test, 'new instance'),
+        ('/(.*)', url_main)))
+    dis = app.MemoryCache(10)(dis)
+    dis = app.MemorySession(600)(dis)
+
+    ws = WebServer(('', 8080), dis)
     try:
         try: ws.serve_forever()
         except KeyboardInterrupt: pass
