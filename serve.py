@@ -40,21 +40,20 @@ class WebServer(object):
         initlog('INFO', None)
         logger.info('WebServer started at %s' % str(self.addr))
 
-    def handler(self, req, stream):
+    def handler(self, req):
         req.url = urlparse(req.uri)
         logger.info('%s %s' % (req.method, req.uri.split('?', 1)[0]))
-        res = self.dis(req, stream)
+        res = self.dis(req)
+        if res is None:
+            res = response_http(500, body='service internal error')
         logger.info('%s %s' % (res.code, res.phrase))
-        res.sendto(stream)
-        if callable(res.body):
-            for d in res.body(): stream.write(d)
-        else: stream.write(res.body)
+        res.sendto(req.stream)
         return res
 
     def sockloop(self, sock, addr):
         stream = sock.makefile()
         try:
-            while self.handler(recv_msg(stream, HttpRequest), stream): pass
+            while self.handler(recv_msg(stream, HttpRequest)): pass
         except (EOFError, socket.error): logger.info('network error')
         except Exception, err: logger.exception('unknown')
         sock.close()
@@ -70,11 +69,11 @@ class WebServer(object):
             sock, addr = listensock.accept()
             self.pool.spawn(self.sockloop, sock, addr)
 
-def url_test(req, stream):
+def url_test(req):
     print 'test params:', req.url_param
     return response_http(200, 'ok', body='test')
 
-def url_main(req, stream):
+def url_main(req):
     count = req.session.get('count', 0)
     print 'main url count: %d' % count
     print 'main url match:', req.url_match
@@ -100,7 +99,7 @@ def url_path(basedir):
         if stat.S_ISSOCK(mode): stat_list.append("s")
         return ''.join(stat_list)
 
-    def file_app(req, stream, filename):
+    def file_app(req, filename):
         def on_body():
             with open(filename, 'rb') as fi:
                 while True:
@@ -109,19 +108,19 @@ def url_path(basedir):
                     yield d
         return response_http(200, body=on_body)
 
-    def inner(req, stream):
+    def inner(req):
         url_path, real_path = calc_path(req.url_match[0], basedir)
         if path.isdir(real_path):
             for i in index_set:
                 test_path = path.join(real_path, i)
                 if os.access(test_path, os.R_OK):
-                    return file_app(req, stream, test_path)
+                    return file_app(req, test_path)
             namelist = os.listdir(real_path)
             namelist.sort()
             return response_http(200, body=tpl.render({
                     'namelist': namelist, 'get_stat_str': get_stat_str,
                     'real_path': real_path, 'url_path': url_path}))
-        else: return file_app(req, stream, real_path)
+        else: return file_app(req, real_path)
     return inner
 
 def main():

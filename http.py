@@ -147,15 +147,18 @@ class HttpResponse(HttpMessage):
     def get_startline(self):
         return ' '.join((self.version, str(self.code), self.phrase))
 
-    def sendto(self, stream):
+    def send_header(self, stream):
         stream.write(self.get_startline() + '\r\n')
-        send_headers(stream, self.headers)
+        for k, l in self.headers:
+            k = '-'.join([t.capitalize() for t in k.split('-')])
+            stream.write("%s: %s\r\n" % (k, l))
+        stream.write('\r\n')
 
-def send_headers(stream, headers):
-    for k, l in headers:
-        k = '-'.join([t.capitalize() for t in k.split('-')])
-        stream.write("%s: %s\r\n" % (k, l))
-    stream.write('\r\n')
+    def sendto(self, stream, *p, **kw):
+        self.send_header(stream)
+        if callable(self.body):
+            for d in self.body(*p, **kw): stream.write(d)
+        else: stream.write(self.body)
 
 def recv_msg(stream, cls):
     line = stream.readline().strip()
@@ -164,6 +167,7 @@ def recv_msg(stream, cls):
     if len(r) < 2: raise Exception('unknown format')
     if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
     msg = cls(*r)
+    msg.stream = stream
     msg.recv_header(stream)
     return msg
 

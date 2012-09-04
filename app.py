@@ -13,29 +13,26 @@ class Dispatch(object):
     def __init__(self, urlmap=None):
         self.urlmap = [[re.compile(i[0]),] + list(i[1:]) for i in urlmap]
 
-    def __call__(self, req, stream):
+    def __call__(self, req):
         for o in self.urlmap:
             m = o[0].match(req.url.path)
             if not m: continue
             req.url_match = m.groups()
             req.url_param = o[2:]
-            return o[1](req, stream)
-        return self.default_handler(req, stream)
+            return o[1](req)
+        return self.default_handler(req)
 
-    def default_handler(req, stream):
+    def default_handler(req):
         return response_http(404, body='File Not Found')
 
 class Cache(object):
     def __call__(self, func):
-        def inner(req, stream):
+        def inner(req):
             pd = self.get_data(req.url.path)
             if pd:
                 cache_logger.info('cache hit in %s', req.url.path)
-                res = cPickle.loads(pd)
-                res.sendto(stream)
-                stream.write(res.body)
-                return res
-            res = func(req, stream)
+                return cPickle.loads(pd)
+            res = func(req)
             if res is not None and res.cache and hasattr(res, 'body'):
                 res.set_header('cache-control', 'max-age=%d' % res.cache)
                 pd = cPickle.dumps(res, 2)
@@ -115,8 +112,8 @@ def get_params_dict(data, sp = '&'):
     if not data: return {}
     rslt = {}
     for p in data.split(sp):
-        i = p.partition('=')
-        rslt[i[0]] = urllib.unquote(i[2])
+        i = p.strip().split('=', 1)
+        rslt[i[0]] = urllib.unquote(i[1])
     return rslt
 
 class Cookie(object):
@@ -142,7 +139,7 @@ class Session(object):
     def __init__(self, timeout): self.exp = timeout
 
     def __call__(self, func):
-        def inner(req, stream):
+        def inner(req):
             req.cookie = Cookie(req.get_header('cookie', None))
             sessionid = req.cookie.get('sessionid', '')
             if not sessionid:
@@ -154,7 +151,7 @@ class Session(object):
             else: req.session = {}
             sess_logger.info('sessionid: %s' % sessionid)
             sess_logger.info('session: %s' % str(req.session))
-            res = func(req, stream)
+            res = func(req)
             self.set_data(sessionid, cPickle.dumps(req.session, 2))
             req.cookie.set_cookie(res)
             return res
