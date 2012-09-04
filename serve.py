@@ -4,7 +4,7 @@
 @date: 2012-09-03
 @author: shell.xu
 '''
-import socket, threading
+import time, socket, signal, threading
 from urlparse import urlparse
 from http import *
 
@@ -23,9 +23,9 @@ logger = logging.getLogger('server')
 
 class WebServer(object):
 
-    def __init__(self, addr, dis, poolsize=10000):
-        self.addr = addr
-        self.pool = pool.Pool(poolsize)
+    def __init__(self, addr, dis, poolsize=100):
+        self.addr, self.poolsize = addr, poolsize
+        self.s = threading.Semaphore(1)
         self.dis = dis
         self.init()
 
@@ -53,18 +53,39 @@ class WebServer(object):
 
     def final(self): logger.info('system exit')
 
+    def run(self):
+        with self.s: sock, addr = self.listensock.accept()
+        self.sockloop(sock, addr)
+
+    siglist = [signal.SIGTERM, signal.SIGINT]
+    def signal(self, signum, frame):
+        if signum in self.siglist:
+            for th in self.pool: th.go = False
+            raise KeyboardInterrupt()
+
     def serve_forever(self):
-        listensock = socket.socket()
-        listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listensock.bind(self.addr)
-        listensock.listen(5)
-        while True:
-            sock, addr = listensock.accept()
-            self.pool.spawn(self.sockloop, sock, addr)
+        self.listensock = socket.socket()
+        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listensock.bind(self.addr)
+        self.listensock.listen(5)
+
+        class ServiceThread(threading.Thread):
+            def __init__(self, ws):
+                super(ServiceThread, self).__init__()
+                self.ws, self.go, self.daemon = ws, True, True
+            def run(self):
+                while self.go:
+                    try: self.ws.run()
+                    except KeyboardInterrupt: break
+                    except Exception: pass
+        self.pool = [ServiceThread(self) for i in xrange(self.poolsize)]
+        for si in self.siglist: signal.signal(si, self.signal)
+        for th in self.pool: th.start()
+        while True: time.sleep(1000)
+        # for th in self.pool: th.join()
 
 def main():
-    import apps
-    ws = WebServer(('', 8080), apps.dis)
+    ws = WebServer(('', 8080), __import__('apps').dis)
     try:
         try: ws.serve_forever()
         except KeyboardInterrupt: pass
