@@ -4,7 +4,7 @@
 @date: 2012-09-03
 @author: shell.xu
 '''
-import time, socket, signal, threading
+import os, time, socket, signal, threading
 from urlparse import urlparse
 from http import *
 
@@ -25,13 +25,17 @@ class WebServer(object):
 
     def __init__(self, addr, dis, poolsize=100):
         self.addr, self.poolsize = addr, poolsize
-        self.s = threading.Semaphore(1)
         self.dis = dis
         self.init()
 
     def init(self):
         initlog('ERROR', None)
         logger.info('WebServer started at %s' % str(self.addr))
+
+        self.listensock = socket.socket()
+        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listensock.bind(self.addr)
+        self.listensock.listen(10000)
 
     def handler(self, req):
         req.url = urlparse(req.uri)
@@ -54,7 +58,7 @@ class WebServer(object):
     def final(self): logger.info('system exit')
 
     def run(self):
-        with self.s: sock, addr = self.listensock.accept()
+        sock, addr = self.listensock.accept()
         self.sockloop(sock, addr)
 
     siglist = [signal.SIGTERM, signal.SIGINT]
@@ -64,11 +68,6 @@ class WebServer(object):
             raise KeyboardInterrupt()
 
     def serve_forever(self):
-        self.listensock = socket.socket()
-        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.listensock.bind(self.addr)
-        self.listensock.listen(10000)
-
         class ServiceThread(threading.Thread):
             def __init__(self, ws):
                 super(ServiceThread, self).__init__()
@@ -84,8 +83,13 @@ class WebServer(object):
         while True: time.sleep(1000)
         # for th in self.pool: th.join()
 
+    def autofork(self, num=4):
+        for i in xrange(num-1):
+            if os.fork() == 0: break
+
 def main():
     ws = WebServer(('', 8080), __import__('apps').dis)
+    ws.autofork()
     try:
         try: ws.serve_forever()
         except KeyboardInterrupt: pass
