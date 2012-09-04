@@ -30,7 +30,7 @@ class WebServer(object):
         self.init()
 
     def init(self):
-        initlog('INFO', None)
+        initlog('ERROR', None)
         logger.info('WebServer started at %s' % str(self.addr))
 
     def handler(self, req):
@@ -67,7 +67,7 @@ class WebServer(object):
         self.listensock = socket.socket()
         self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listensock.bind(self.addr)
-        self.listensock.listen(5)
+        self.listensock.listen(10000)
 
         class ServiceThread(threading.Thread):
             def __init__(self, ws):
