@@ -5,13 +5,12 @@
 @author: shell.xu
 '''
 import os, stat, urllib, logging
-import app
+import midware
 from http import *
 from template import Template
 from os import path
 from urlparse import urlparse
 # from contextlib import contextmanager
-from gevent import pool, socket, dns
 
 __all__ = []
 
@@ -124,13 +123,13 @@ def url_path(basedir):
     return inner
 
 def main():
-    dis = app.Dispatch((
+    dis = midware.Dispatch((
         ('/test/(.*)', url_test),
         ('/test1/(.*)', url_test, 'new instance'),
         ('/self/(.*)', url_path('.')),
         ('/(.*)', url_main)))
-    dis = app.MemoryCache(10)(dis)
-    dis = app.MemorySession(600)(dis)
+    dis = midware.MemoryCache(10)(dis)
+    dis = midware.MemorySession(600)(dis)
 
     ws = WebServer(('', 8080), dis)
     try:
