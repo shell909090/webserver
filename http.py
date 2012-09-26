@@ -87,6 +87,13 @@ class HttpMessage(object):
 
     def has_header(self, k): return self.get_header(k) is not None
 
+    def send_header(self, stream):
+        stream.write(self.get_startline() + '\r\n')
+        for k, l in self.headers:
+            k = '-'.join([t.capitalize() for t in k.split('-')])
+            stream.write("%s: %s\r\n" % (k, l))
+        stream.write('\r\n')
+
     def recv_header(self, stream):
         while True:
             line = stream.readline()
@@ -146,13 +153,6 @@ class HttpResponse(HttpMessage):
 
     def get_startline(self):
         return ' '.join((self.version, str(self.code), self.phrase))
-
-    def send_header(self, stream):
-        stream.write(self.get_startline() + '\r\n')
-        for k, l in self.headers:
-            k = '-'.join([t.capitalize() for t in k.split('-')])
-            stream.write("%s: %s\r\n" % (k, l))
-        stream.write('\r\n')
 
     def sendto(self, stream, *p, **kw):
         self.send_header(stream)
