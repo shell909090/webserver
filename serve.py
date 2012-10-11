@@ -87,6 +87,10 @@ class WebServer(object):
         for i in xrange(num-1):
             if os.fork() == 0: break
 
+    def run_gevent(self):
+        from gevent import server
+        server.StreamServer(self.addr, self.sockloop).serve_forever()
+
 def main():
     ws = WebServer(('', 8080), __import__('apps').dis)
     ws.autofork()
