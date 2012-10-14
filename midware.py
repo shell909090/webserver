@@ -34,7 +34,7 @@ class Cache(object):
                 return cPickle.loads(pd)
             res = func(req)
             if res is not None and res.cache and hasattr(res, 'body'):
-                res.set_header('cache-control', 'max-age=%d' % res.cache)
+                res.set_header('Cache-Control', 'max-age=%d' % res.cache)
                 pd = cPickle.dumps(res, 2)
                 self.set_data(req.url.path, pd, res.cache)
             return res
@@ -133,14 +133,14 @@ class Cookie(object):
         self.v[k] = v
     def set_cookie(self, res):
         for k in self.m:
-            res.add_header('set-cookie', '%s=%s' % (k, urllib.quote(self.v[k])))
+            res.add_header('Set-Cookie', '%s=%s' % (k, urllib.quote(self.v[k])))
 
 class Session(object):
     def __init__(self, timeout): self.exp = timeout
 
     def __call__(self, func):
         def inner(req):
-            req.cookie = Cookie(req.get_header('cookie', None))
+            req.cookie = Cookie(req.get_header('Cookie', None))
             sessionid = req.cookie.get('sessionid', '')
             if not sessionid:
                 sessionid = get_rnd_sess()
