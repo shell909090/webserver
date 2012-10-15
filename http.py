@@ -4,11 +4,11 @@
 @date: 2012-04-26
 @author: shell.xu
 '''
-import logging, cStringIO
+import logging
 
 logger = logging.getLogger('http')
 
-BUFSIZE = 512
+BUFSIZE = 8192
 CODE_NOBODY = [100, 101, 204, 304]
 DEFAULT_PAGES = {
     100:('Continue', 'Request received, please continue'),
@@ -64,11 +64,14 @@ DEFAULT_PAGES = {
 
 def dummy_write(d): return
 
+def capitalize_httptitle(k):
+    return '-'.join([t.capitalize() for t in k.split('-')])
+
 class HttpMessage(object):
     def __init__(self): self.headers = []
 
     def add_header(self, k, v):
-        self.headers.append([k.lower(), v])
+        self.headers.append([k, v])
 
     def set_header(self, k, v):
         for h in self.headers:
@@ -89,9 +92,7 @@ class HttpMessage(object):
 
     def send_header(self, stream):
         stream.write(self.get_startline() + '\r\n')
-        for k, l in self.headers:
-            k = '-'.join([t.capitalize() for t in k.split('-')])
-            stream.write("%s: %s\r\n" % (k, l))
+        for k, l in self.headers: stream.write("%s: %s\r\n" % (k, l))
         stream.write('\r\n')
 
     def recv_header(self, stream):
@@ -105,32 +106,30 @@ class HttpMessage(object):
                 self.add_header(h.strip(), v.strip())
             else: self.add_header(h.strip(), line.strip())
 
-    def recv_body(self, stream, on_body=dummy_write, hasbody=False, raw=False):
-        if self.get_header('transfer-encoding', 'identity') != 'identity':
+    def read_chunk(self, stream, hasbody=False, raw=False):
+        if self.get_header('Transfer-Encoding', 'identity') != 'identity':
             logger.debug('recv body on chunk mode')
             chunk_size = 1
             while chunk_size:
                 line = stream.readline()
                 chunk = line.split(';')
                 chunk_size = int(chunk[0], 16)
-                if raw: on_body(line + stream.read(chunk_size + 2))
-                else: on_body(stream.read(chunk_size + 2)[:-2])
-        elif self.has_header('content-length'):
-            length = int(self.get_header('content-length'))
+                if raw: yield line + stream.read(chunk_size + 2)
+                else: yield stream.read(chunk_size + 2)[:-2]
+        elif self.has_header('Content-Length'):
+            length = int(self.get_header('Content-Length'))
             logger.debug('recv body on length mode, size: %s' % length)
             for i in xrange(0, length, BUFSIZE):
-                on_body(stream.read(min(length - i, BUFSIZE)))
+                yield stream.read(min(length - i, BUFSIZE))
         elif hasbody:
             logger.debug('recv body on close mode')
             d = stream.read(BUFSIZE)
             while d:
-                on_body(d)
+                yield d
                 d = stream.read(BUFSIZE)
 
     def read_body(self, hasbody=False, raw=False):
-        strs = cStringIO.StringIO()
-        self.recv_body(self.stream, strs.write)
-        return strs.getvalue()
+        return ''.join(self.read_chunk(self.stream, hasbody, raw))
 
     def read_form(self):
         return dict([i.split('=', 1) for i in self.read_body().split('&')])
