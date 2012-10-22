@@ -62,7 +62,7 @@ class WebServer(object):
         self.sockloop(sock, addr)
 
     siglist = [signal.SIGTERM, signal.SIGINT]
-    def signal(self, signum, frame):
+    def signal_handler(self, signum, frame):
         if signum in self.siglist:
             for th in self.pool: th.go = False
             raise KeyboardInterrupt()
