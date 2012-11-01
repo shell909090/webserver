@@ -78,7 +78,7 @@ class WebServer(object):
                     except KeyboardInterrupt: break
                     except Exception: pass
         self.pool = [ServiceThread(self) for i in xrange(self.poolsize)]
-        for si in self.siglist: signal.signal(si, self.signal)
+        for si in self.siglist: signal.signal(si, self.signal_handler)
         for th in self.pool: th.start()
         while True: time.sleep(1000)
         # for th in self.pool: th.join()
@@ -93,7 +93,7 @@ class WebServer(object):
 
 def main():
     ws = WebServer(('', 8080), __import__('apps').dis)
-    ws.autofork()
+    # ws.autofork()
     try:
         try: ws.serve_forever()
         except KeyboardInterrupt: pass
