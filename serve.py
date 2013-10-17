@@ -4,7 +4,7 @@
 @date: 2012-09-03
 @author: shell.xu
 '''
-import os, time, socket, signal, threading
+import os, time, socket, signal, threading, logging
 from urlparse import urlparse
 from http import *
 

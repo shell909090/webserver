@@ -14,6 +14,11 @@ def url_test(req):
     print 'test params:', req.url_param
     return response_http(200, 'ok', body='test')
 
+def url_post(req):
+    l = str(len(req.read_body()))
+    print 'test post:', l
+    return response_http(200, 'ok', body=l)
+
 def url_main(req):
     count = req.session.get('count', 0)
     print 'main url count: %d' % count
@@ -68,6 +73,7 @@ dis = midware.Dispatch((
         ('/test/(.*)', url_test),
         ('/test1/(.*)', url_test, 'new instance'),
         ('/self/(.*)', url_path('.')),
+        ('/post/(.*)', url_post),
         ('/(.*)', url_main)))
 dis = midware.MemoryCache(10)(dis)
 dis = midware.MemorySession(600)(dis)
