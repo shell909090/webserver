@@ -11,7 +11,7 @@ import http
 def parseurl(url):
     u = urlparse(url)
     uri = u.path
-    if u.query: uri += u.query
+    if u.query: uri += '?' + u.query
     if ':' not in u.netloc:
         host, port = u.netloc, 443 if u.scheme == 'https' else 80
     else: host, port = u.netloc.split(':', 1)

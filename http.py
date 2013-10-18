@@ -8,7 +8,8 @@ import socket, logging
 
 logger = logging.getLogger('http')
 
-BUFSIZE = 8192
+CHUNK_MIN   = 1024
+BUFSIZE     = 8192
 CODE_NOBODY = [100, 101, 204, 304]
 DEFAULT_PAGES = {
     100:('Continue', 'Request received, please continue'),
@@ -74,7 +75,13 @@ def file_source(stream):
         d = stream.read(BUFSIZE)
 
 def chunked(f):
-    for d in f: yield '%x\r\n%s\r\n' % (len(d), d,)
+    s = ''
+    for d in f:
+        s += d
+        if len(s) > CHUNK_MIN:
+            yield '%x\r\n%s\r\n' % (len(s), s,)
+            s = ''
+    if s: yield '%x\r\n%s\r\n' % (len(s), s,)
     yield '0\r\n\r\n'
 
 class HttpMessage(object):
@@ -188,10 +195,10 @@ def request_http(uri, method=None, version=None, headers=None, body=None):
         if isinstance(body, basestring):
             req.set_header('Content-Length', str(len(body)))
         elif hasattr(body, '__iter__'):
-            req.set_header('Transfer-Encoding', 'chunk')
+            req.set_header('Transfer-Encoding', 'chunked')
             body = chunked(body)
         elif hasattr(body, 'read'):
-            req.set_header('Transfer-Encoding', 'chunk')
+            req.set_header('Transfer-Encoding', 'chunked')
             body = chunked(file_source(body))
         req.body = body
     return req
@@ -279,7 +286,7 @@ def download(host, port, uri, method=None, headers=None, data=None):
 def upload(host, port, uri, headers=None):
     req = request_http(uri, method='POST', headers=headers)
     req.set_header('Host', host)
-    req.set_header('Transfer-Encoding', 'chunk')
+    req.set_header('Transfer-Encoding', 'chunked')
 
     sock = socket.socket()
     sock.connect((host, port))
