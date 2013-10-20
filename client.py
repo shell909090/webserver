@@ -4,7 +4,7 @@
 @date: 2013-10-17
 @author: shell.xu
 '''
-import os, sys, logging
+import os, sys, socket, logging
 from urlparse import urlparse
 import http
 
@@ -18,27 +18,37 @@ def parseurl(url):
     return host, int(port), uri
 
 def download(url):
-    host, port, uri = parseurl(url)
-    try:
-        resp = http.download(host, port, uri)
-        return resp.read_body()
+    resp = http.download(url)
+    try: return resp.read_body()
     finally: resp.stream.close()
 
 def getfile(url):
-    host, port, uri = parseurl(url)
-    return http.download(host, port, uri).makefile().read()
+    return http.download(url).makefile().read()
 
 def post(url):
-    host, port, uri = parseurl(url)
     with open('http.pyc', 'rb') as fi:
-        return http.download(host, port, uri, data=fi).makefile().read()
+        return http.download(url, data=fi).makefile().read()
 
 def upload(url):
-    host, port, uri = parseurl(url)
-    f = http.upload(host, port, uri)
-    with open('http.py', 'rb') as fi:
-        for line in fi: f.write(line)
-    f.close()
+    host, port, uri = http.parseurl(url)
+    req = http.request_http(uri, 'POST')
+    req.set_header('Host', host)
+    req.set_header('Transfer-Encoding', 'chunked')
+    sock = socket.socket()
+    sock.connect((host, port))
+    stream = sock.makefile()
+    try:
+        req.send_header(stream)
+        return http.RequestFile(stream)
+    except:
+        sock.close()
+        raise
+
+def test_upload(url):
+    f = upload(url)
+    with f:
+        with open('http.py', 'rb') as fi:
+            for line in fi: f.write(line)
     resp = f.get_response()
     return resp.read_body()
 
@@ -47,6 +57,6 @@ def main():
     print 'download self len:', len(download('http://localhost:8080/self/'))
     print 'get file self len:', len(getfile('http://localhost:8080/self/'))
     print 'post file:', post('http://localhost:8080/post/')
-    print 'upload file:', upload('http://localhost:8080/post/')
+    print 'upload file:', test_upload('http://localhost:8080/post/')
 
 if __name__ == '__main__': main()

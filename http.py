@@ -4,7 +4,7 @@
 @date: 2012-04-26
 @author: shell.xu
 '''
-import socket, logging
+import socket, logging, urlparse
 
 logger = logging.getLogger('http')
 
@@ -68,49 +68,60 @@ def dummy_write(d): return
 def capitalize_httptitle(k):
     return '-'.join([t.capitalize() for t in k.split('-')])
 
-def file_source(stream):
-    d = stream.read(BUFSIZE)
+def file_source(stream, size=BUFSIZE):
+    d = stream.read(size)
     while d:
         yield d
-        d = stream.read(BUFSIZE)
+        d = stream.read(size)
 
 def chunked(f):
     s = ''
     for d in f:
         s += d
         if len(s) > CHUNK_MIN:
-            yield '%x\r\n%s\r\n' % (len(s), s,)
+            yield '%X\r\n%s\r\n' % (len(s), s,)
             s = ''
-    if s: yield '%x\r\n%s\r\n' % (len(s), s,)
+    if s: yield '%X\r\n%s\r\n' % (len(s), s,)
     yield '0\r\n\r\n'
 
 class HttpMessage(object):
-    def __init__(self): self.headers, self.body = [], None
+    def __init__(self): self.headers, self.body = {}, None
 
     def add_header(self, k, v):
-        self.headers.append([k, v])
+        self.headers.setdefault(k, [])
+        self.headers[k].append(v)
 
     def set_header(self, k, v):
-        for h in self.headers:
-            if h[0] == k:
-                h[1] = v
-                return
-        self.add_header(k, v)
+        self.headers[k] = [v,]
 
     def get_header(self, k, v=None):
-        for ks, vs in self.headers:
-            if ks == k: return vs
-        return v
+        if k not in self.headers or len(self.headers[k]) == 0:
+            return v
+        return self.headers[k][0]
 
     def get_headers(self, k):
-        return [vs for ks, vs in self.headers if ks == k]
+        return self.headers.get(k, [])
 
-    def has_header(self, k): return self.get_header(k) is not None
+    def has_header(self, k):
+        return self.get_header(k) is not None
 
     def send_header(self, stream):
         stream.write(self.get_startline() + '\r\n')
-        for k, l in self.headers: stream.write("%s: %s\r\n" % (k, l))
+        for k, l in self.headers.iteritems():
+            for v in l: stream.write("%s: %s\r\n" % (k, v))
         stream.write('\r\n')
+
+    @classmethod
+    def recv_msg(cls, stream):
+        line = stream.readline().strip()
+        if len(line) == 0: raise EOFError()
+        r = line.split(' ', 2)
+        if len(r) < 2: raise Exception('unknown format')
+        if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
+        msg = cls(*r)
+        msg.stream = stream
+        msg.recv_header(stream)
+        return msg
 
     def recv_header(self, stream):
         while True:
@@ -162,20 +173,16 @@ class HttpMessage(object):
 
     def debug(self):
         logger.debug(self.d + self.get_startline())
-        for k, v in self.headers: logger.debug('%s%s: %s' % (self.d, k, v))
+        for k, l in self.headers.iteritems():
+            for v in l: logger.debug('%s%s: %s' % (self.d, k, v))
 
-def recv_msg(stream, cls):
-    line = stream.readline().strip()
-    if len(line) == 0: raise EOFError()
-    r = line.split(' ', 2)
-    if len(r) < 2: raise Exception('unknown format')
-    if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
-    msg = cls(*r)
-    msg.stream = stream
-    msg.recv_header(stream)
-    return msg
+class FileBase(object):
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self.close()
 
-class HttpRequest(HttpMessage):
+class Request(HttpMessage):
     d = '> '
 
     def __init__(self, method, uri, version):
@@ -188,7 +195,7 @@ class HttpRequest(HttpMessage):
 def request_http(uri, method=None, version=None, headers=None, body=None):
     if not method: method = 'GET' if body is None else 'POST'
     if not version: version = 'HTTP/1.1'
-    req = HttpRequest(method, uri, version)
+    req = Request(method, uri, version)
     if isinstance(headers, dict): headers = headers.items()
     if headers: req.headers = headers
     if body:
@@ -203,7 +210,7 @@ def request_http(uri, method=None, version=None, headers=None, body=None):
         req.body = body
     return req
 
-class HttpRequestFile(object):
+class RequestFile(FileBase):
 
     def __init__(self, stream):
         self.stream = stream
@@ -216,9 +223,9 @@ class HttpRequestFile(object):
         self.stream.flush()
 
     def get_response(self):
-        return recv_msg(self.stream, HttpResponse)
+        return Response.recv_msg(self.stream)
 
-class HttpResponse(HttpMessage):
+class Response(HttpMessage):
     d = '< '
 
     def __init__(self, version, code, phrase):
@@ -232,13 +239,13 @@ class HttpResponse(HttpMessage):
         return ' '.join((self.version, str(self.code), self.phrase))
 
     def makefile(self):
-        return HttpResponseFile(self)
+        return ResponseFile(self)
 
 def response_http(code, phrase=None, version=None, headers=None,
                   cache=0, body=None):
     if not phrase: phrase = DEFAULT_PAGES[code][0]
     if not version: version = 'HTTP/1.1'
-    res = HttpResponse(version, code, phrase)
+    res = Response(version, code, phrase)
     if isinstance(headers, dict): headers = header.items()
     if headers: res.headers = headers
     if body:
@@ -248,13 +255,20 @@ def response_http(code, phrase=None, version=None, headers=None,
     res.cache=cache
     return res
 
-class HttpResponseFile(object):
+class ResponseFile(FileBase):
 
     def __init__(self, resp):
         self.resp, self.f, self.d = resp, resp.read_chunk(resp.stream), ''
 
+    def getcode(self):
+        return int(self.resp.code)
+
     def read(self, size=None):
-        if self.f is None: return ''
+        if self.f is None:
+            if self.d:
+                d, self.d = self.d, ''
+                return self.d
+            return ''
         while size is None or self.d < size:
             try: d = self.f.next()
             except StopIteration:
@@ -268,29 +282,29 @@ class HttpResponseFile(object):
 
     def close(self):
         self.f = None
-        self.resp.stream.close()
+        if self.resp.get_header('Connection') != 'keep-alive':
+            self.resp.stream.close()
 
-def download(host, port, uri, method=None, headers=None, data=None):
+def parseurl(url):
+    u = urlparse.urlparse(url)
+    uri = u.path
+    if u.query: uri += '?' + u.query
+    if ':' not in u.netloc:
+        host, port = u.netloc, 443 if u.scheme == 'https' else 80
+    else: host, port = u.netloc.split(':', 1)
+    return host, int(port), uri
+
+def download(url, method=None, headers=None, data=None):
+    host, port, uri = parseurl(url)
     req = request_http(uri, method, headers=headers, body=data)
     req.set_header('Host', host)
-
     sock = socket.socket()
     sock.connect((host, port))
     stream = sock.makefile()
-    req.sendto(stream)
-    stream.flush()
-
-    resp = recv_msg(stream, HttpResponse)
-    return resp
-
-def upload(host, port, uri, headers=None):
-    req = request_http(uri, method='POST', headers=headers)
-    req.set_header('Host', host)
-    req.set_header('Transfer-Encoding', 'chunked')
-
-    sock = socket.socket()
-    sock.connect((host, port))
-    stream = sock.makefile()
-    req.send_header(stream)
-
-    return HttpRequestFile(stream)
+    try:
+        req.sendto(stream)
+        stream.flush()
+        return Response.recv_msg(stream)
+    except:
+        sock.close()
+        raise

@@ -5,7 +5,6 @@
 @author: shell.xu
 '''
 import os, time, socket, signal, threading, logging
-from urlparse import urlparse
 from http import *
 
 def initlog(lv, logfile=None):
@@ -38,7 +37,7 @@ class WebServer(object):
         self.listensock.listen(10000)
 
     def handler(self, req):
-        req.url = urlparse(req.uri)
+        req.url = urlparse.urlparse(req.uri)
         logger.info('%s %s' % (req.method, req.uri.split('?', 1)[0]))
         res = self.dis(req)
         if res is None:
@@ -50,7 +49,7 @@ class WebServer(object):
     def sockloop(self, sock, addr):
         stream = sock.makefile()
         try:
-            while self.handler(recv_msg(stream, HttpRequest)): pass
+            while self.handler(Request.recv_msg(stream)): pass
         except (EOFError, socket.error): logger.info('network error')
         except Exception, err: logger.exception('unknown')
         sock.close()
