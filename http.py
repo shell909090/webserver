@@ -105,6 +105,13 @@ class HttpMessage(object):
     def has_header(self, k):
         return self.get_header(k) is not None
 
+    def del_header(self, k):
+        del self.headers[k]
+
+    def iter_headers(self):
+        for k, l in self.headers.iteritems():
+            for v in l: yield k, v
+
     def send_header(self, stream):
         stream.write(self.get_startline() + '\r\n')
         for k, l in self.headers.iteritems():
