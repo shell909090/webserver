@@ -75,13 +75,7 @@ def file_source(stream, size=BUFSIZE):
         d = stream.read(size)
 
 def chunked(f):
-    s = ''
-    for d in f:
-        s += d
-        if len(s) > CHUNK_MIN:
-            yield '%X\r\n%s\r\n' % (len(s), s,)
-            s = ''
-    if s: yield '%X\r\n%s\r\n' % (len(s), s,)
+    for d in f: yield '%X\r\n%s\r\n' % (len(d), d)
     yield '0\r\n\r\n'
 
 class HttpMessage(object):
@@ -117,6 +111,7 @@ class HttpMessage(object):
         for k, l in self.headers.iteritems():
             for v in l: stream.write("%s: %s\r\n" % (k, v))
         stream.write('\r\n')
+        stream.flush()
 
     @classmethod
     def recv_msg(cls, stream):
@@ -141,16 +136,23 @@ class HttpMessage(object):
                 self.add_header(h.strip(), v.strip())
             else: self.add_header(h.strip(), line.strip())
 
-    def read_chunk(self, stream, hasbody=False, raw=False):
+    def isclose(self, hasbody=False):
+        if self.get_header('Transfer-Encoding', 'identity') == 'identity' and \
+           not self.has_header('Content-Length') and hasbody:
+            return True
+        if self.version.upper() == 'HTTP/1.1':
+            return self.get_header('Connection', '').lower() == 'close'
+        if self.get_header('Keep-Alive'): return False
+        return self.get_header('Connection', '').lower() != 'keep-alive'
+
+    def read_chunk(self, stream, hasbody=False):
         if self.get_header('Transfer-Encoding', 'identity') != 'identity':
             logger.debug('recv body on chunk mode')
             chunk_size = 1
             while chunk_size:
-                line = stream.readline()
-                chunk = line.split(';')
+                chunk = stream.readline().rstrip().split(';')
                 chunk_size = int(chunk[0], 16)
-                if raw: yield line + stream.read(chunk_size + 2)
-                else: yield stream.read(chunk_size + 2)[:-2]
+                yield stream.read(chunk_size + 2)[:-2]
         elif self.has_header('Content-Length'):
             length = int(self.get_header('Content-Length'))
             logger.debug('recv body on length mode, size: %s' % length)
@@ -163,25 +165,27 @@ class HttpMessage(object):
                 yield d
                 d = stream.read(BUFSIZE)
 
-    def read_body(self, hasbody=False, raw=False):
-        return ''.join(self.read_chunk(self.stream, hasbody, raw))
+    def read_body(self, hasbody=False):
+        return ''.join(self.read_chunk(self.stream, hasbody))
 
     def read_form(self):
-        return dict([i.split('=', 1) for i in self.read_body().split('&')])
+        return dict(i.split('=', 1) for i in self.read_body().split('&'))
 
-    def sendto(self, stream, *p, **kw):
+    def sendto(self, stream, body=None, *p):
+        body = body or self.body
         self.send_header(stream)
-        if self.body is None: return
-        elif callable(self.body):
-            for d in self.body(*p, **kw): stream.write(d)
-        elif hasattr(self.body, '__iter__'):
-            for d in self.body: stream.write(d)
-        else: stream.write(self.body)
+        if body is None: return
+        if callable(body): body = body(*p)
+        if hasattr(body, '__iter__'):
+            for d in body: stream.write(d)
+        else: stream.write(body)
+        stream.flush()
 
     def debug(self):
         logger.debug(self.d + self.get_startline())
         for k, l in self.headers.iteritems():
             for v in l: logger.debug('%s%s: %s' % (self.d, k, v))
+        logger.debug('')
 
 class FileBase(object):
     def __enter__(self):
@@ -254,12 +258,19 @@ def response_http(code, phrase=None, version=None, headers=None,
     if not version: version = 'HTTP/1.1'
     res = Response(version, code, phrase)
     if isinstance(headers, dict): headers = header.items()
-    if headers: res.headers = headers
+    if hasattr(headers, '__iter__'):
+        for k, v in header: res.add_header(k, v)
     if body:
         if isinstance(body, basestring):
             res.set_header('Content-Length', str(len(body)))
         res.body = body
-    res.cache=cache
+    res.cache = cache
+    return res
+
+def response_to(req, code, phrase=None, headers=None, body=None):
+    res = response_http(
+        code, phrase=phrase, version=req.version, headers=headers, body=body)
+    res.sendto(req.stream)
     return res
 
 class ResponseFile(FileBase):
@@ -310,7 +321,6 @@ def download(url, method=None, headers=None, data=None):
     stream = sock.makefile()
     try:
         req.sendto(stream)
-        stream.flush()
         return Response.recv_msg(stream)
     except:
         sock.close()
