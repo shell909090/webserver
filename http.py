@@ -6,8 +6,6 @@
 '''
 import socket, logging, urlparse
 
-logger = logging.getLogger('http')
-
 CHUNK_MIN   = 1024
 BUFSIZE     = 8192
 CODE_NOBODY = [100, 101, 204, 304]
@@ -62,8 +60,6 @@ DEFAULT_PAGES = {
           'The gateway server did not receive a timely response'),
     505:('HTTP Version Not Supported', 'Cannot fulfill request.'),
 }
-
-def dummy_write(d): return
 
 def capitalize_httptitle(k):
     return '-'.join([t.capitalize() for t in k.split('-')])
@@ -136,18 +132,9 @@ class HttpMessage(object):
                 self.add_header(h.strip(), v.strip())
             else: self.add_header(h.strip(), line.strip())
 
-    def isclose(self, hasbody=False):
-        if self.get_header('Transfer-Encoding', 'identity') == 'identity' and \
-           not self.has_header('Content-Length') and hasbody:
-            return True
-        if self.version.upper() == 'HTTP/1.1':
-            return self.get_header('Connection', '').lower() == 'close'
-        if self.get_header('Keep-Alive'): return False
-        return self.get_header('Connection', '').lower() != 'keep-alive'
-
     def read_chunk(self, stream, hasbody=False):
         if self.get_header('Transfer-Encoding', 'identity') != 'identity':
-            logger.debug('recv body on chunk mode')
+            logging.debug('recv body on chunk mode')
             chunk_size = 1
             while chunk_size:
                 chunk = stream.readline().rstrip().split(';')
@@ -155,11 +142,11 @@ class HttpMessage(object):
                 yield stream.read(chunk_size + 2)[:-2]
         elif self.has_header('Content-Length'):
             length = int(self.get_header('Content-Length'))
-            logger.debug('recv body on length mode, size: %s' % length)
+            logging.debug('recv body on length mode, size: %s' % length)
             for i in xrange(0, length, BUFSIZE):
                 yield stream.read(min(length - i, BUFSIZE))
         elif hasbody:
-            logger.debug('recv body on close mode')
+            logging.debug('recv body on close mode')
             d = stream.read(BUFSIZE)
             while d:
                 yield d
@@ -174,7 +161,9 @@ class HttpMessage(object):
     def sendto(self, stream, body=None, *p):
         body = body or self.body
         self.send_header(stream)
-        if body is None: return
+        if body is None:
+            stream.flush()
+            return
         if callable(body): body = body(*p)
         if hasattr(body, '__iter__'):
             for d in body: stream.write(d)
@@ -182,10 +171,10 @@ class HttpMessage(object):
         stream.flush()
 
     def debug(self):
-        logger.debug(self.d + self.get_startline())
+        logging.debug(self.d + self.get_startline())
         for k, l in self.headers.iteritems():
-            for v in l: logger.debug('%s%s: %s' % (self.d, k, v))
-        logger.debug('')
+            for v in l: logging.debug('%s%s: %s' % (self.d, k, v))
+        logging.debug('')
 
 class FileBase(object):
     def __enter__(self):
@@ -242,7 +231,7 @@ class Response(HttpMessage):
     def __init__(self, version, code, phrase):
         HttpMessage.__init__(self)
         self.version, self.code, self.phrase = version, int(code), phrase
-        self.connection, self.cache = False, 0
+        self.connection, self.cache = True, 0
 
     def __nonzero__(self): return self.connection
 
