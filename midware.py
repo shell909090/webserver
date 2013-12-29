@@ -7,8 +7,6 @@
 import re, time, heapq, random, urllib, cPickle, logging
 from http import *
 
-cache_logger = logging.getLogger('cache')
-
 class Dispatch(object):
     def __init__(self, urlmap=None):
         self.urlmap = [[re.compile(i[0]),] + list(i[1:]) for i in urlmap]
@@ -30,7 +28,7 @@ class Cache(object):
         def inner(req):
             pd = self.get_data(req.url.path)
             if pd:
-                cache_logger.info('cache hit in %s', req.url.path)
+                logging.info('cache hit in %s', req.url.path)
                 return cPickle.loads(pd)
             res = func(req)
             if res is not None and res.cache and hasattr(res, 'body'):
@@ -102,8 +100,6 @@ class MemoryCache(Cache):
     def set_data(self, k, v, exp):
         self.oh[k] = (v, time.time() + exp)
 
-sess_logger = logging.getLogger('sess')
-
 random.seed()
 alpha = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/'
 def get_rnd_sess(): return ''.join(random.sample(alpha, 32))
@@ -149,8 +145,8 @@ class Session(object):
             else: data = self.get_data(sessionid)
             if data: req.session = cPickle.loads(data)
             else: req.session = {}
-            sess_logger.info('sessionid: %s' % sessionid)
-            sess_logger.info('session: %s' % str(req.session))
+            logging.info('sessionid: %s' % sessionid)
+            logging.info('session: %s' % str(req.session))
             res = func(req)
             self.set_data(sessionid, cPickle.dumps(req.session, 2))
             req.cookie.set_cookie(res)
