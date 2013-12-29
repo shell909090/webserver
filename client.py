@@ -6,7 +6,16 @@
 '''
 import os, sys, socket, logging
 from urlparse import urlparse
-import http
+import utils, http
+
+LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s](%(module)s:%(lineno)d): %(message)s'
+def initlog(lv, logfile=None, stream=None, longdate=False):
+    if isinstance(lv, basestring): lv = getattr(logging, lv)
+    kw = {'format': LOGFMT, 'datefmt': '%H:%M:%S', 'level': lv}
+    if logfile: kw['filename'] = logfile
+    if stream: kw['stream'] = stream
+    if longdate: kw['datefmt'] = '%Y-%m-%d %H:%M:%S'
+    logging.basicConfig(**kw)
 
 def parseurl(url):
     u = urlparse(url)
@@ -53,7 +62,7 @@ def test_upload(url):
     return resp.read_body()
 
 def main():
-    logging.basicConfig(level=logging.DEBUG)
+    utils.initlog('DEBUG')
     print 'download self len:', len(download('http://localhost:8080/self/'))
     print 'get file self len:', len(getfile('http://localhost:8080/self/'))
     print 'post file:', post('http://localhost:8080/post/')
