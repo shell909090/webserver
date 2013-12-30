@@ -10,50 +10,6 @@ from datetime import datetime
 from urlparse import urlparse
 from threading import Thread
 
-class WebServer(object):
-
-    def __init__(self, dis, accesslog=None):
-        self.dis = dis
-        if accesslog: self.accessfile = open(accesslog, 'a')
-
-    def http_handler(self, req):
-        req.url = urlparse(req.uri)
-        logging.info('%s %s' % (req.method, req.uri.split('?', 1)[0]))
-        res = self.dis(req)
-        if res is None:
-            res = response_http(500, body='service internal error')
-        logging.info('%s %s' % (res.code, res.phrase))
-        res.sendto(req.stream)
-        return res
-
-    def record_access(self, req, res, addr):
-        if not hasattr(self, 'accessfile'): return
-        if res is not None:
-            code = res.code
-            length = res.get_header('Content-Length')
-            if length is None and hasattr(res, 'length'):
-                length = str(res.length)
-            if length is None: length = '-'
-        else: code, length = 500, '-'
-        self.accessfile.write(
-            '%s:%d - - [%s] "%s" %d %s "-" %s\n' % (
-                addr[0], addr[1], datetime.now().isoformat(),
-                req.get_startline(), code, length,
-                req.get_header('User-Agent')))
-        self.accessfile.flush()
-
-    def handler(self, sock, addr):
-        stream = sock.makefile()
-        res = True
-        try:
-            while res:
-                req = http.Request.recv_msg(stream)
-                res = self.http_handler(req)
-                self.record_access(req, res, addr)
-        except (EOFError, socket.error): logging.info('network error')
-        except Exception, err: logging.exception('unknown')
-        finally: sock.close()
-
 class ThreadServer(object):
 
     def __init__(self, addr, handler, poolsize=10):
@@ -98,11 +54,17 @@ def main():
         cfg.get('log.loglevel', 'WARNING'), cfg.get('log.logfile'))
     addr = (cfg.get('main.addr', ''), int(cfg.get('main.port', '8080')))
 
-    import apps
+    # import apps
+    # ws = http.WebServer(apps.dis, cfg.get('log.access'))
+
+    import app_webpy
+    ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
+
     from gevent.server import StreamServer
-    ws = WebServer(apps.dis, cfg.get('log.access'))
-    # ws = StreamServer(addr, ws.handler)
-    ws = ThreadServer(addr, ws.handler)
+    ws = StreamServer(addr, ws.handler)
+
+    # ws = ThreadServer(addr, ws.handler)
+
     try: ws.serve_forever()
     except KeyboardInterrupt: pass
 

@@ -5,26 +5,7 @@
 @author: shell.xu
 '''
 import os, sys, socket, logging
-from urlparse import urlparse
 import utils, http
-
-LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s](%(module)s:%(lineno)d): %(message)s'
-def initlog(lv, logfile=None, stream=None, longdate=False):
-    if isinstance(lv, basestring): lv = getattr(logging, lv)
-    kw = {'format': LOGFMT, 'datefmt': '%H:%M:%S', 'level': lv}
-    if logfile: kw['filename'] = logfile
-    if stream: kw['stream'] = stream
-    if longdate: kw['datefmt'] = '%Y-%m-%d %H:%M:%S'
-    logging.basicConfig(**kw)
-
-def parseurl(url):
-    u = urlparse(url)
-    uri = u.path
-    if u.query: uri += '?' + u.query
-    if ':' not in u.netloc:
-        host, port = u.netloc, 443 if u.scheme == 'https' else 80
-    else: host, port = u.netloc.split(':', 1)
-    return host, int(port), uri
 
 def download(url):
     resp = http.download(url)
@@ -35,7 +16,7 @@ def getfile(url):
     return http.download(url).makefile().read()
 
 def post(url):
-    with open('http.pyc', 'rb') as fi:
+    with open('http.py', 'rb') as fi:
         return http.download(url, data=fi).makefile().read()
 
 def upload(url):
@@ -48,7 +29,7 @@ def upload(url):
     stream = sock.makefile()
     try:
         req.send_header(stream)
-        return http.RequestFile(stream)
+        return http.RequestWriteFile(stream)
     except:
         sock.close()
         raise
@@ -57,7 +38,7 @@ def test_upload(url):
     f = upload(url)
     with f:
         with open('http.py', 'rb') as fi:
-            for line in fi: f.write(line)
+            f.write(fi.read())
     resp = f.get_response()
     return resp.read_body()
 

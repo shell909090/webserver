@@ -12,12 +12,12 @@ from template import Template
 
 def url_test(req):
     print 'test params:', req.url_param
-    return response_http(200, 'ok', body='test')
+    return response_http(200, body='test')
 
 def url_post(req):
     l = str(len(req.read_body()))
     print 'test post:', l
-    return response_http(200, 'ok', body=l)
+    return response_http(200, body=l)
 
 def url_main(req):
     count = req.session.get('count', 0)
