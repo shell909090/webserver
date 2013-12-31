@@ -54,11 +54,11 @@ def main():
         cfg.get('log.loglevel', 'WARNING'), cfg.get('log.logfile'))
     addr = (cfg.get('main.addr', ''), int(cfg.get('main.port', '8080')))
 
-    # import apps
-    # ws = http.WebServer(apps.dis, cfg.get('log.access'))
+    import apps
+    ws = http.WebServer(apps.dis, cfg.get('log.access'))
 
-    import app_webpy
-    ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
+    # import app_webpy
+    # ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
 
     from gevent.server import StreamServer
     ws = StreamServer(addr, ws.handler)

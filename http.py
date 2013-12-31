@@ -61,67 +61,80 @@ DEFAULT_PAGES = {
     505:('HTTP Version Not Supported', 'Cannot fulfill request.'),
 }
 
-def capitalize_httptitle(k):
-    return '-'.join([t.capitalize() for t in k.split('-')])
-
 def file_source(stream, size=BUFSIZE):
-    try:
+    d = stream.read(size)
+    while d:
+        yield d
         d = stream.read(size)
-        while d:
-            yield d
-            d = stream.read(size)
-    finally: stream.close()
+
+def chunked_body(stream):
+    chunk_size = 1
+    while chunk_size:
+        chunk = stream.readline().rstrip().split(';')
+        chunk_size = int(chunk[0], 16)
+        yield stream.read(chunk_size + 2)[:-2]
+
+def length_body(stream, length):
+    for i in xrange(0, length, BUFSIZE):
+        yield stream.read(min(length - i, BUFSIZE))
 
 def chunked(f):
     for d in f: yield '%X\r\n%s\r\n' % (len(d), d)
     yield '0\r\n\r\n'
 
-class HttpMessage(object):
-    def __init__(self): self.headers, self.body = {}, None
+class BufferedFile(object):
+    def __init__(self, it):
+        self.it, self.buf = it, ''
 
-    def add_header(self, k, v):
+    def read(self, size=-1):
+        try:
+            while size == -1 or len(self.buf) < size:
+                self.buf += self.it.next()
+        except StopIteration:
+            size = len(self.buf)
+        r, self.buf = self.buf[:size], self.buf[size:]
+        return r
+
+class HttpMessage(object):
+
+    def __init__(self):
+        self.headers, self.sent = {}, False
+        self.length, self.body = None, None
+
+    def add(self, k, v):
         self.headers.setdefault(k, [])
         self.headers[k].append(v)
 
-    def set_header(self, k, v):
+    def __setitem__(self, k, v):
         self.headers[k] = [v,]
 
-    def get_header(self, k, v=None):
-        if k not in self.headers or len(self.headers[k]) == 0:
-            return v
+    def __getitem__(self, k):
+        if k not in self: raise KeyError
+        return self.headers[k][0]
+
+    def get(self, k, v=None):
+        if k not in self: return v
         return self.headers[k][0]
 
     def get_headers(self, k):
         return self.headers.get(k, [])
 
-    def has_header(self, k):
-        return self.get_header(k) is not None
+    def __contains__(self, k):
+        return self.headers.get(k)
 
-    def del_header(self, k):
+    def __delitem__(self, k):
         del self.headers[k]
 
-    def iter_headers(self):
+    def __iter__(self):
         for k, l in self.headers.iteritems():
             for v in l: yield k, v
 
     def send_header(self, stream):
         stream.write(self.get_startline() + '\r\n')
-        for k, l in self.headers.iteritems():
-            for v in l: stream.write("%s: %s\r\n" % (k, v))
+        for k, v in self: stream.write("%s: %s\r\n" % (k, v))
         stream.write('\r\n')
         stream.flush()
-
-    @classmethod
-    def recv_msg(cls, stream):
-        line = stream.readline().strip()
-        if len(line) == 0: raise EOFError()
-        r = line.split(' ', 2)
-        if len(r) < 2: raise Exception('unknown format', r)
-        if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
-        msg = cls(*r)
-        msg.stream = stream
-        msg.recv_header(stream)
-        return msg
+        self.sent = True
 
     def recv_header(self, stream):
         while True:
@@ -131,45 +144,75 @@ class HttpMessage(object):
             if not line: break
             if line[0] not in (' ', '\t'):
                 h, v = line.split(':', 1)
-                self.add_header(h.strip(), v.strip())
-            else: self.add_header(h.strip(), line.strip())
+                self.add(h.strip(), v.strip())
+            else: self.add(h.strip(), line.strip())
 
-    def read_chunk(self, stream, hasbody=False):
-        if self.get_header('Transfer-Encoding', 'identity') != 'identity':
+    @classmethod
+    def recvfrom(cls, stream):
+        line = stream.readline().strip()
+        if len(line) == 0: raise EOFError()
+        r = line.split(' ', 2)
+        if len(r) < 2: raise Exception('unknown format', r)
+        if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
+        msg = cls(*r)
+        msg.recv_header(stream)
+        msg.stream = stream
+        if msg.get('Transfer-Encoding', 'identity') != 'identity':
+            msg.body = chunked_body(stream)
             logging.debug('recv body on chunk mode')
-            chunk_size = 1
-            while chunk_size:
-                chunk = stream.readline().rstrip().split(';')
-                chunk_size = int(chunk[0], 16)
-                yield stream.read(chunk_size + 2)[:-2]
-        elif self.has_header('Content-Length'):
-            length = int(self.get_header('Content-Length'))
-            logging.debug('recv body on length mode, size: %s' % length)
-            for i in xrange(0, length, BUFSIZE):
-                yield stream.read(min(length - i, BUFSIZE))
-        elif hasbody:
+        elif 'Content-Length' in msg:
+            msg.length = int(msg['Content-Length'])
+            msg.body = length_body(stream, msg.length)
+            logging.debug('recv body on length mode, size: %s' % msg.length)
+        else:
+            msg.body = file_source(stream)
             logging.debug('recv body on close mode')
-            d = stream.read(BUFSIZE)
-            while d:
-                yield d
-                d = stream.read(BUFSIZE)
+        return msg
 
-    def read_body(self, hasbody=False):
-        return ''.join(self.read_chunk(self.stream, hasbody))
+    # def read_chunk(self, stream, hasbody=False):
+    #     if self.get_header('Transfer-Encoding', 'identity') != 'identity':
+    #         logging.debug('recv body on chunk mode')
+    #         chunk_size = 1
+    #         while chunk_size:
+    #             chunk = stream.readline().rstrip().split(';')
+    #             chunk_size = int(chunk[0], 16)
+    #             yield stream.read(chunk_size + 2)[:-2]
+    #     elif self.has_header('Content-Length'):
+    #         length = int(self.get_header('Content-Length'))
+    #         logging.debug('recv body on length mode, size: %s' % length)
+    #         for i in xrange(0, length, BUFSIZE):
+    #             yield stream.read(min(length - i, BUFSIZE))
+    #     elif hasbody:
+    #         logging.debug('recv body on close mode')
+    #         d = stream.read(BUFSIZE)
+    #         while d:
+    #             yield d
+    #             d = stream.read(BUFSIZE)
+
+    def read_body(self):
+        if hasattr(self.body, '__iter__'): self.body = ''.join(self.body)
+        if hasattr(self.body, 'read'): self.body = self.body.read()
+        return self.body
 
     def read_form(self):
         return dict(i.split('=', 1) for i in self.read_body().split('&'))
 
-    def sendto(self, stream, body=None, *p):
-        body = body or self.body
+    def sendto(self, stream):
+        if hasattr(self.body, 'read'): # transfer file to chunk
+            self.body = file_source(self.body)
+        elif isinstance(self.body, basestring):
+            self.length = len(self.body)
+        if self.length is not None: # length fit for data and stream
+            self['Content-Length'] = str(self.length)
+        elif self.body is not None: # set chunked if use chunk mode
+            self['Transfer-Encoding'] = 'chunked'
+            self.body = chunked(self.body)
         self.send_header(stream)
-        if body is None:
-            stream.flush()
-            return
-        if callable(body): body = body(*p)
-        if hasattr(body, '__iter__'):
-            for d in body: stream.write(d)
-        else: stream.write(body)
+        if self.body is None: return
+        if hasattr(self.body, '__iter__'):
+            # FIXME: check length for stream?
+            for b in self.body: stream.write(b)
+        else: stream.write(self.body)
         stream.flush()
 
     def debug(self):
@@ -199,17 +242,9 @@ def request_http(uri, method=None, version=None, headers=None, body=None):
     if not version: version = 'HTTP/1.1'
     req = Request(method, uri, version)
     if isinstance(headers, dict): headers = headers.items()
-    if headers: req.headers = headers
-    if body:
-        if isinstance(body, basestring):
-            req.set_header('Content-Length', str(len(body)))
-        elif hasattr(body, '__iter__'):
-            req.set_header('Transfer-Encoding', 'chunked')
-            body = chunked(body)
-        elif hasattr(body, 'read'):
-            req.set_header('Transfer-Encoding', 'chunked')
-            body = chunked(file_source(body))
-        req.body = body
+    if headers:
+        for k, v in headers: req.add(k, v)
+    if body: req.body = body
     return req
 
 class RequestWriteFile(FileBase):
@@ -225,21 +260,7 @@ class RequestWriteFile(FileBase):
         self.stream.flush()
 
     def get_response(self):
-        return Response.recv_msg(self.stream)
-
-class RequestReadFile(object):
-
-    def __init__(self, req):
-        self.it, self.buf = req.read_chunk(req.stream), ''
-
-    def read(self, size=None):
-        try:
-            while size is None or len(self.buf) < size:
-                self.buf += self.it.next()
-        except StopIteration:
-            size = len(self.buf)
-        r, self.buf = self.buf[:size], self.buf[size:]
-        return r
+        return Response.recvfrom(self.stream)
 
 class Response(HttpMessage):
     d = '< '
@@ -257,55 +278,35 @@ class Response(HttpMessage):
     def makefile(self):
         return ResponseFile(self)
 
-def response_http(code, phrase=None, version=None, headers=None,
-                  cache=0, body=None):
+def response_http(code, phrase=None, version=None,
+                  headers=None, body=None, cache=0):
     if not phrase: phrase = DEFAULT_PAGES[code][0]
     if not version: version = 'HTTP/1.1'
     res = Response(version, code, phrase)
-    if isinstance(headers, dict): headers = header.items()
-    if hasattr(headers, '__iter__'):
-        for k, v in header: res.add_header(k, v)
-    if body:
-        if isinstance(body, basestring):
-            res.set_header('Content-Length', str(len(body)))
-        res.body = body
+    if isinstance(headers, dict): headers = headers.items()
+    if headers:
+        for k, v in headers: req.add(k, v)
+    if body: res.body = body
     res.cache = cache
     return res
 
 def response_to(req, code, phrase=None, headers=None, body=None):
-    res = response_http(
-        code, phrase=phrase, version=req.version, headers=headers, body=body)
+    res = response_http(code, phrase=phrase, version=req.version,
+                        headers=headers, body=body)
     res.sendto(req.stream)
     return res
 
 class ResponseFile(FileBase):
 
     def __init__(self, resp):
-        self.resp, self.f, self.d = resp, resp.read_chunk(resp.stream), ''
+        self.resp, self.f = resp, BufferedFile(resp.body)
+        self.read = self.f.read
 
     def getcode(self):
         return int(self.resp.code)
 
-    def read(self, size=None):
-        if self.f is None:
-            if self.d:
-                d, self.d = self.d, ''
-                return self.d
-            return ''
-        while size is None or self.d < size:
-            try: d = self.f.next()
-            except StopIteration:
-                self.close()
-                break
-            self.d += d
-        if size is not None:
-            d, self.d = self.d[:size], self.d[size:]
-        else: d, self.d = self.d, ''
-        return d
-
     def close(self):
-        self.f = None
-        if self.resp.get_header('Connection') != 'keep-alive':
+        if self.resp.get('Connection') != 'keep-alive':
             self.resp.stream.close()
 
 def parseurl(url):
@@ -317,55 +318,53 @@ def parseurl(url):
     else: host, port = u.netloc.split(':', 1)
     return host, int(port), uri
 
+# connection pool
 def download(url, method=None, headers=None, data=None):
     host, port, uri = parseurl(url)
     req = request_http(uri, method, headers=headers, body=data)
-    req.set_header('Host', host)
+    req['Host'] = host
     sock = socket.socket()
     sock.connect((host, port))
     stream = sock.makefile()
     try:
         req.sendto(stream)
-        return Response.recv_msg(stream)
+        return Response.recvfrom(stream)
     except:
         sock.close()
         raise
 
 class WebServer(object):
 
-    def __init__(self, do, accesslog=None):
-        self.do = do
+    def __init__(self, application, accesslog=None):
+        self.application = application
         if accesslog == '': self.accessfile = sys.stdout
         elif accesslog: self.accessfile = open(accesslog, 'a')
 
-    def http_handler(self, req):
-        req.url = urlparse.urlparse(req.uri)
-        res = self.do(req)
-        if res is None: res = response_http(500, body='service internal error')
-        res.sendto(req.stream)
-        return res
-
     def record_access(self, req, res, addr):
         if not hasattr(self, 'accessfile'): return
-        if res is not None:
-            code = res.code
-            length = res.get_header('Content-Length')
-            if length is None and hasattr(res, 'length'):
-                length = str(res.length)
-            if length is None: length = '-'
-        else: code, length = 500, '-'
+        if res is None: code, length = 500, None
+        else: code, length = res.code, res.length
+        if length is None: length = '-'
+        else: length = str(length)
         self.accessfile.write(
             '%s:%d - - [%s] "%s" %d %s "-" %s\n' % (
                 addr[0], addr[1], datetime.datetime.now().isoformat(),
                 req.get_startline(), code, length, req.get_header('User-Agent')))
         self.accessfile.flush()
 
+    def http_handler(self, req):
+        req.url = urlparse.urlparse(req.uri)
+        res = self.application(req)
+        if res is None:
+            res = response_http(500, body='service internal error')
+        res.sendto(req.stream)
+        return res
+
     def handler(self, sock, addr):
-        stream = sock.makefile()
-        res = True
+        stream, res = sock.makefile(), True
         try:
             while res:
-                req = Request.recv_msg(stream)
+                req = Request.recvfrom(stream)
                 res = self.http_handler(req)
                 self.record_access(req, res, addr)
         except (EOFError, socket.error): logging.info('network error')
@@ -374,23 +373,18 @@ class WebServer(object):
 
 class WSGIServer(WebServer):
 
-    def __init__(self, application, accesslog=None):
-        self.application = application
-        if accesslog == '': self.accessfile = sys.stdout
-        elif accesslog: self.accessfile = open(accesslog, 'a')
-
     def req2env(self, req):
         env = dict(('HTTP_' + k.upper().replace('-', '_'), v)
-                   for k, v in req.iter_headers())
+                   for k, v in req)
         env['REQUEST_METHOD'] = req.method
         env['SCRIPT_NAME'] = ''
         env['PATH_INFO'] = req.url.path
         env['QUERY_STRING'] = req.url.query
-        env['CONTENT_TYPE'] = req.get_header('Content-Type')
-        env['CONTENT_LENGTH'] = req.get_header('Content-Length')
+        env['CONTENT_TYPE'] = req.get('Content-Type')
+        env['CONTENT_LENGTH'] = req.get('Content-Length', 0)
         env['SERVER_PROTOCOL'] = req.version
         if req.method in set(['POST', 'PUT']):
-            env['wsgi.input'] = RequestReadFile(req)
+            env['wsgi.input'] = BufferedFile(req.body)
         return env
 
     def http_handler(self, req):
@@ -398,23 +392,22 @@ class WSGIServer(WebServer):
         env = self.req2env(req)
 
         res = response_http(500)
-        req.header_sent = False
-        def start_response(status, res_headers):
+        def start_response(status, headers):
             r = status.split(' ', 1)
             res.code = int(r[0])
             if len(r) > 1: res.phrase = r[1]
             else: res.phrase = DEFAULT_PAGES[resp.code][0]
-            for k, v in res_headers: res.add_header(k, v)
-            res.add_header('Transfer-Encoding', 'chunked')
+            for k, v in headers: res.add(k, v)
+            res.add('Transfer-Encoding', 'chunked')
             res.send_header(req.stream)
-            res.header_sent = True
 
         try:
             for b in chunked(self.application(env, start_response)):
                 req.stream.write(b)
             req.stream.flush()
         except Exception, err:
-            if hasattr(res, 'header_sent') and not res.header_sent:
-                res.send_header(req.stream)
+            if not res.sent: res.send_header(req.stream)
             raise
+        finally: # empty all send body
+            for b in req.body: pass
         return res

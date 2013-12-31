@@ -22,8 +22,8 @@ def post(url):
 def upload(url):
     host, port, uri = http.parseurl(url)
     req = http.request_http(uri, 'POST')
-    req.set_header('Host', host)
-    req.set_header('Transfer-Encoding', 'chunked')
+    req['Host'] = host
+    req['Transfer-Encoding'] = 'chunked'
     sock = socket.socket()
     sock.connect((host, port))
     stream = sock.makefile()
