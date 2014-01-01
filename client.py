@@ -9,7 +9,7 @@ import utils, http
 
 def download(url):
     resp = http.download(url)
-    try: return resp.read_body()
+    try: return resp.readbody()
     finally: resp.stream.close()
 
 def getfile(url):
@@ -24,8 +24,7 @@ def upload(url):
     req = http.request_http(uri, 'POST')
     req['Host'] = host
     req['Transfer-Encoding'] = 'chunked'
-    sock = socket.socket()
-    sock.connect((host, port))
+    sock = http.connector.connect((host, port))
     stream = sock.makefile()
     try:
         req.send_header(stream)
@@ -40,7 +39,7 @@ def test_upload(url):
         with open('http.py', 'rb') as fi:
             f.write(fi.read())
     resp = f.get_response()
-    return resp.read_body()
+    return resp.readbody()
 
 def main():
     utils.initlog('DEBUG')

@@ -15,7 +15,7 @@ def url_test(req):
     return response_http(200, body='test')
 
 def url_post(req):
-    l = str(len(req.read_body()))
+    l = str(len(req.readbody()))
     print 'test post:', l
     return response_http(200, body=l)
 
