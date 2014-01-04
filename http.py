@@ -61,6 +61,13 @@ DEFAULT_PAGES = {
     505:('HTTP Version Not Supported', 'Cannot fulfill request.'),
 }
 
+HTTPTIMEFMT = '%a, %d %b %Y %H:%M:%S %Z'
+def HttpDate2Time(s):
+    return datetime.datetime.strptime(s, HTTPTIMEFMT)
+
+def Time2HttpDate(dt):
+    return dt.strftime(HTTPTIMEFMT)
+
 def file_source(stream, size=BUFSIZE):
     d = stream.read(size)
     while d:
@@ -285,7 +292,7 @@ def response_http(code, phrase=None, version=None,
     res = Response(version, code, phrase)
     if isinstance(headers, dict): headers = headers.items()
     if headers:
-        for k, v in headers: req.add(k, v)
+        for k, v in headers: res.add(k, v)
     if body: res.body = body
     res.cache = cache
     return res
@@ -345,15 +352,17 @@ class WebServer(object):
         stream, res = sock.makefile(), True
         try:
             while res:
-                req = Request.recvfrom(stream)
-                req.remote = addr
-                res = self.http_handler(req)
+                try:
+                    req = Request.recvfrom(stream)
+                    req.remote = addr
+                    res = self.http_handler(req)
+                finally:
+                    if res is True: res = None
+                    self.record_access(req, res, addr)
+
         except (EOFError, socket.error): logging.info('network error')
         except Exception, err: logging.exception('unknown')
-        finally:
-            sock.close()
-            if res is True: res = None
-            self.record_access(req, res, addr)
+        finally: sock.close()
 
 class WSGIServer(WebServer):
 

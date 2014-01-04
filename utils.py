@@ -4,7 +4,7 @@
 @date: 2013-12-30
 @author: shell.xu
 '''
-import getopt, logging
+import logging
 
 LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s](%(module)s:%(lineno)d): %(message)s'
 def initlog(lv, logfile=None, stream=None, longdate=False):

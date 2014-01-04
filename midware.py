@@ -32,7 +32,7 @@ class Cache(object):
                 return cPickle.loads(pd)
             res = func(req)
             if res is not None and res.cache and hasattr(res, 'body'):
-                res.set_header('Cache-Control', 'max-age=%d' % res.cache)
+                res['Cache-Control'] = 'max-age=%d' % res.cache
                 pd = cPickle.dumps(res, 2)
                 self.set_data(req.url.path, pd, res.cache)
             return res
