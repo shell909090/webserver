@@ -54,16 +54,22 @@ def main():
         cfg.get('log.loglevel', 'WARNING'), cfg.get('log.logfile'))
     addr = (cfg.get('main.addr', ''), int(cfg.get('main.port', '8080')))
 
-    import apps
-    ws = http.WebServer(apps.dis, cfg.get('log.access'))
+    engine = cfg.get('server.engine', 'apps')
+    if engine == 'apps':
+        import apps
+        ws = http.WebServer(apps.dis, cfg.get('log.access'))
+    elif engine == 'wsgi':
+        import app_webpy
+        ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
+    else: raise Exception('invaild engine %s' % engine)
 
-    # import app_webpy
-    # ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
-
-    from gevent.server import StreamServer
-    ws = StreamServer(addr, ws.handler)
-
-    # ws = ThreadServer(addr, ws.handler)
+    server = cfg.get('server.server', 'gevent')
+    if server == 'gevent':
+        from gevent.server import StreamServer
+        ws = StreamServer(addr, ws.handler)
+    elif server == 'thread':
+        ws = ThreadServer(addr, ws.handler)
+    else: raise Exception('invaild server %s' % server)
 
     try: ws.serve_forever()
     except KeyboardInterrupt: pass

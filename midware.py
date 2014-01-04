@@ -31,7 +31,7 @@ class Cache(object):
                 logging.info('cache hit in %s', req.url.path)
                 return cPickle.loads(pd)
             res = func(req)
-            if res is not None and res.cache and hasattr(res, 'body'):
+            if res is not None and res.cache and res.body:
                 res['Cache-Control'] = 'max-age=%d' % res.cache
                 pd = cPickle.dumps(res, 2)
                 self.set_data(req.url.path, pd, res.cache)

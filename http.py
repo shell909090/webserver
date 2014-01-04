@@ -114,6 +114,7 @@ class HttpMessage(object):
     def __init__(self):
         self.headers, self.sent = {}, False
         self.length, self.body = None, None
+        self.keepalive, self.cache = True, 0
 
     def add(self, k, v):
         self.headers.setdefault(k, [])
@@ -166,6 +167,14 @@ class HttpMessage(object):
         for k, v in self: logging.debug('%s%s: %s' % (self.d, k, v))
         logging.debug('')
 
+    def recvdone(self):
+        if self.version == 'HTTP/1.1':
+            self.keepalive = self.get('Connection') != 'close'
+        else: self.keepalive = self.get('Connection') == 'keep-alive'
+
+    def beforesend(self):
+        self['Connection'] = 'keep-alive' if self.keepalive else 'close'
+
     @classmethod
     def recvfrom(cls, stream):
         line = stream.readline().strip()
@@ -187,7 +196,7 @@ class HttpMessage(object):
             msg.body = file_source(stream)
             logging.debug('recv body on close mode')
         else: logging.debug('recv body on nobody mode')
-        if hasattr(msg, 'recvdone'): msg.recvdone()
+        msg.recvdone()
         return msg
 
     def readbody(self):
@@ -199,6 +208,7 @@ class HttpMessage(object):
         return dict(i.split('=', 1) for i in self.readbody().split('&'))
 
     def sendto(self, stream):
+        self.beforesend()
         if hasattr(self.body, 'read'): # transfer file to chunk
             self.body = file_source(self.body)
         elif isinstance(self.body, basestring):
@@ -264,17 +274,11 @@ class Response(HttpMessage):
     def __init__(self, version, code, phrase):
         HttpMessage.__init__(self)
         self.version, self.code, self.phrase = version, int(code), phrase
-        self.connection, self.cache = True, 0
 
-    def recvdone(self):
-        if self.version == 'HTTP/1.1':
-            self.connection = self.get('Connection') != 'close'
-        else: self.connection = self.get('Connection') == 'keep-alive'
-
-    def __nonzero__(self): return self.connection
+    def __nonzero__(self): return self.keepalive
 
     def close(self):
-        if not self.connection: self.stream.close()
+        if not self.keepalive: self.stream.close()
         else: connector.release(self.stream._sock)
 
     def get_startline(self):
@@ -286,7 +290,7 @@ class Response(HttpMessage):
         return ResponseFile(self)
 
 def response_http(code, phrase=None, version=None,
-                  headers=None, body=None, cache=0):
+                  headers=None, body=None):
     if not phrase: phrase = DEFAULT_PAGES[code][0]
     if not version: version = 'HTTP/1.1'
     res = Response(version, code, phrase)
@@ -294,12 +298,12 @@ def response_http(code, phrase=None, version=None,
     if headers:
         for k, v in headers: res.add(k, v)
     if body: res.body = body
-    res.cache = cache
     return res
 
 def response_to(req, code, phrase=None, headers=None, body=None):
     res = response_http(code, phrase=phrase, version=req.version,
                         headers=headers, body=body)
+    res.keepalive = req.keepalive
     res.sendto(req.stream)
     return res
 
