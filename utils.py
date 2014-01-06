@@ -19,7 +19,4 @@ def getcfg(cfgpathes):
     from ConfigParser import SafeConfigParser
     cp = SafeConfigParser()
     cp.read(cfgpathes)
-    rslt = {}
-    for sec in cp.sections():
-        for k, v in cp.items(sec): rslt[sec + '.' + k] = v
-    return rslt
+    return cp

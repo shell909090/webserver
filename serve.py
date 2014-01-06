@@ -50,20 +50,19 @@ class ThreadServer(object):
 def main():
     cfg = utils.getcfg([
         'serve.conf', '~/.webserver/serve.conf', '/etc/webserver/serve.conf'])
-    utils.initlog(
-        cfg.get('log.loglevel', 'WARNING'), cfg.get('log.logfile'))
-    addr = (cfg.get('main.addr', ''), int(cfg.get('main.port', '8080')))
+    utils.initlog(cfg.get('log', 'loglevel'), cfg.get('log', 'logfile'))
+    addr = (cfg.get('main', 'addr'), cfg.getint('main', 'port'))
 
-    engine = cfg.get('server.engine', 'apps')
+    engine = cfg.get('server', 'engine')
     if engine == 'apps':
         import apps
-        ws = http.WebServer(apps.dis, cfg.get('log.access'))
+        ws = http.WebServer(apps.dis, cfg.get('log', 'access'))
     elif engine == 'wsgi':
         import app_webpy
-        ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log.access'))
+        ws = http.WSGIServer(app_webpy.app.wsgifunc(), cfg.get('log', 'access'))
     else: raise Exception('invaild engine %s' % engine)
 
-    server = cfg.get('server.server', 'gevent')
+    server = cfg.get('server', 'server')
     if server == 'gevent':
         from gevent.server import StreamServer
         ws = StreamServer(addr, ws.handler)
