@@ -6,31 +6,33 @@
 '''
 import os, sys, socket, logging
 import utils, http
+from contextlib import closing
 
 def download(url):
-    resp = http.download(url)
-    try: return resp.readbody()
-    finally: resp.stream.close()
+    with closing(http.download(url)) as resp:
+        return resp.readbody()
 
 def getfile(url):
-    return http.download(url).makefile().read()
+    with http.download(url).makefile() as f:
+        return f.read()
 
 def post(url):
     with open('http.py', 'rb') as fi:
-        return http.download(url, data=fi).makefile().read()
+        with http.download(url, data=fi).makefile() as f:
+            return f.read()
 
 def upload(url):
     host, port, uri = http.parseurl(url)
     req = http.request_http(uri, 'POST')
+    req.remote = (host, port)
     req['Host'] = host
     req['Transfer-Encoding'] = 'chunked'
-    sock = http.connector.connect((host, port))
-    stream = sock.makefile()
+    stream = http.connector.connect(req.remote)
     try:
         req.send_header(stream)
         return http.RequestWriteFile(stream)
     except:
-        sock.close()
+        stream.close()
         raise
 
 def test_upload(url):
@@ -38,14 +40,14 @@ def test_upload(url):
     with f:
         with open('http.py', 'rb') as fi:
             f.write(fi.read())
-    resp = f.get_response()
-    return resp.readbody()
+    with closing(f.get_response()) as resp:
+        return resp.readbody()
 
 def main():
     utils.initlog('DEBUG')
     print 'download self len:', len(download('http://localhost:8080/self/'))
     print 'get file self len:', len(getfile('http://localhost:8080/self/'))
-    print 'post file:', post('http://localhost:8080/post/')
     print 'upload file:', test_upload('http://localhost:8080/post/')
+    print 'post file:', post('http://localhost:8080/post/')
 
 if __name__ == '__main__': main()

@@ -278,8 +278,7 @@ class Response(HttpMessage):
     def __nonzero__(self): return self.keepalive
 
     def close(self):
-        if self.sock and self.keepalive:
-            connector.release(self.sock)
+        if self.keepalive: connector.release(self.stream)
         else: self.stream.close()
 
     def get_startline(self):
@@ -357,14 +356,15 @@ class WebServer(object):
         stream, res = sock.makefile(), True
         try:
             while res:
+                req, res = None, None
                 try:
                     req = Request.recvfrom(stream)
                     req.remote = addr
                     res = self.http_handler(req)
                 finally:
-                    if res is True: res = None
-                    self.record_access(req, res, addr)
-
+                    if req:
+                        if res is True: res = None
+                        self.record_access(req, res, addr)
         except (EOFError, socket.error): logging.info('network error')
         except Exception, err: logging.exception('unknown')
         finally: sock.close()
@@ -412,49 +412,52 @@ class WSGIServer(WebServer):
 
 class SocketPool(object):
 
-    def __init__(self, max_addr=0):
+    def __init__(self, max_addr=-1):
         self.lock = threading.RLock()
         self.buf, self.max_addr = {}, max_addr
 
+    def setmax(self, max_addr=-1):
+        self.max_addr = max_addr
+
     def connect(self, addr):
-        host, conn = addr[0], None
+        host, stream = addr[0], None
         addr = (socket.gethostbyname(host), addr[1])
         with self.lock:
             if self.buf.get(addr):
-                conn = self.buf[addr].pop(0)
+                stream = self.buf[addr].pop(0)
                 logging.debug('acquire conn %s:%d size %d' % (
                     host, addr[1], len(self.buf[addr])))
-        if conn is None:
+        if stream is None:
             logging.debug('create new conn: %s:%d' % (host, addr[1]))
             conn = socket.socket()
             try: conn.connect(addr)
             except IOError: return
-        return conn
+            stream = conn.makefile()
+        return stream
 
-    def release(self, conn):
-        addr = conn.getpeername()
+    def release(self, stream):
+        addr = stream._sock.getpeername()
         with self.lock:
             self.buf.setdefault(addr, [])
-            if self.max_addr <= 0 or len(self.buf[addr]) < self.max_addr:
-                self.buf[addr].append(conn)
+            if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
+                self.buf[addr].append(stream)
                 logging.debug('release conn %s:%d back size %d' % (
                     addr[0], addr[1], len(self.buf[addr])))
                 return
         logging.debug('free conn %s:%d.' % (addr[0], addr[1]))
-        conn.close()
+        stream.close()
 
 connector = SocketPool()
 
 def round_trip(req):
-    try: sock = connector.connect(req.remote)
+    try: req.stream = connector.connect(req.remote)
     except IOError: return response_to(req, 502)
-    req.stream = sock.makefile()
     try:
         req.sendto(req.stream)
         req.stream.flush()
         return Response.recvfrom(req.stream)
     except:
-        sock.close()
+        req.stream.close()
         raise
 
 def download(url, method=None, headers=None, data=None):
