@@ -176,7 +176,7 @@ class HttpMessage(object):
         self['Connection'] = 'keep-alive' if self.keepalive else 'close'
 
     @classmethod
-    def recvfrom(cls, stream):
+    def recvfrom(cls, stream, sock=None):
         line = stream.readline().strip()
         if len(line) == 0: raise EOFError()
         r = line.split(' ', 2)
@@ -184,7 +184,7 @@ class HttpMessage(object):
         if len(r) < 3: r.append(DEFAULT_PAGES[int(r[1])][0])
         msg = cls(*r)
         msg.recv_header(stream)
-        msg.stream = stream
+        msg.stream, msg.sock = stream, sock
         if msg.get('Transfer-Encoding', 'identity') != 'identity':
             msg.body = chunked_body(stream)
             logging.debug('recv body on chunk mode')
@@ -278,8 +278,9 @@ class Response(HttpMessage):
     def __nonzero__(self): return self.keepalive
 
     def close(self):
-        if not self.keepalive: self.stream.close()
-        else: connector.release(self.stream._sock)
+        if self.sock and self.keepalive:
+            connector.release(self.sock)
+        else: self.stream.close()
 
     def get_startline(self):
         return ' '.join((self.version, str(self.code), self.phrase))
@@ -450,6 +451,7 @@ def round_trip(req):
     req.stream = sock.makefile()
     try:
         req.sendto(req.stream)
+        req.stream.flush()
         return Response.recvfrom(req.stream)
     except:
         sock.close()
@@ -457,6 +459,7 @@ def round_trip(req):
 
 def download(url, method=None, headers=None, data=None):
     host, port, uri = parseurl(url)
+    if not uri: uri = '/'
     req = request_http(uri, method, headers=headers, body=data)
     req.remote = (host, port)
     req['Host'] = host
