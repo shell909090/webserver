@@ -3,8 +3,14 @@
 '''
 @date: 2012-09-03
 @author: shell.xu
+@license: BSD-3-clause
 '''
-import re, time, heapq, random, urllib, cPickle, logging
+from __future__ import absolute_import, division, print_function, unicode_literals
+import re, time, heapq, random, pickle, logging
+try:
+    from urllib import quote, unquote
+except ImportError:
+    from urllib.parse import quote, unquote
 from http import *
 
 class Dispatch(object):
@@ -29,14 +35,15 @@ class Cache(object):
             pd = self.get_data(req.url.path)
             if pd:
                 logging.info('cache hit in %s', req.url.path)
-                return cPickle.loads(pd)
+                return pickle.loads(pd)
             res = func(req)
             if res is not None and res.cache and res.body:
                 res['Cache-Control'] = 'max-age=%d' % res.cache
-                pd = cPickle.dumps(res, 2)
+                pd = pickle.dumps(res, 2)
                 self.set_data(req.url.path, pd, res.cache)
             return res
         return inner
+
 
 class ObjHeap(object):
     ''' 使用lru算法的对象缓存容器，感谢Evan Prodromou <evan@bad.dynu.ca>。
@@ -50,10 +57,14 @@ class ObjHeap(object):
         self.size, self.f = size, 0
         self.__dict, self.__heap = {}, []
 
-    def __len__(self): return len(self.__dict)
-    def __contains__(self, k): return self.__dict.has_key(k)
+    def __len__(self):
+        return len(self.__dict)
+
+    def __contains__(self, k):
+        return k in self.__dict
+
     def __setitem__(self, k, v):
-        if self.__dict.has_key(k):
+        if k in self.__dict:
             n = self.__dict[k]
             n.v = v
             self.f += 1
@@ -109,7 +120,7 @@ def get_params_dict(data, sp = '&'):
     rslt = {}
     for p in data.split(sp):
         i = p.strip().split('=', 1)
-        rslt[i[0]] = urllib.unquote(i[1])
+        rslt[i[0]] = unquote(i[1])
     return rslt
 
 class Cookie(object):
@@ -129,7 +140,7 @@ class Cookie(object):
         self.v[k] = v
     def set_cookie(self, res):
         for k in self.m:
-            res.add('Set-Cookie', '%s=%s' % (k, urllib.quote(self.v[k])))
+            res.add('Set-Cookie', '%s=%s' % (k, quote(self.v[k])))
 
 class Session(object):
     def __init__(self, timeout): self.exp = timeout
@@ -143,12 +154,14 @@ class Session(object):
                 req.cookie['sessionid'] = sessionid
                 data = None
             else: data = self.get_data(sessionid)
-            if data: req.session = cPickle.loads(data)
-            else: req.session = {}
+            if data:
+                req.session = pickle.loads(data)
+            else:
+                req.session = {}
             logging.info('sessionid: %s' % sessionid)
             logging.info('session: %s' % str(req.session))
             res = func(req)
-            self.set_data(sessionid, cPickle.dumps(req.session, 2))
+            self.set_data(sessionid, pickle.dumps(req.session, 2))
             req.cookie.set_cookie(res)
             return res
         return inner

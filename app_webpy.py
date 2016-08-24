@@ -3,7 +3,9 @@
 '''
 @date: 2013-12-30
 @author: shell.xu
+@license: BSD-3-clause
 '''
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os, copy, stat, http, urllib
 from os import path
 import web
@@ -11,19 +13,19 @@ from template import Template
 
 class Test(object):
     def GET(self, name):
-        print 'test params:', name
+        print('test params: {}'.format(name))
         return 'test'
 
 class Post(object):
     def POST(self, name):
         l = len(web.data())
-        print 'test post:', l
+        print('test post: {}'.format(l))
         return str(l)
 
 class Main(object):
     def GET(self, name):
-        print 'main url count: %d' % session.count
-        print 'main url match:', name
+        print('main url count: {}'.format(session.count))
+        print('main url match: {}'.format(name))
         session.count += 1
 
 def get_stat_str(mode):

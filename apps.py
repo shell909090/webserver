@@ -3,28 +3,30 @@
 '''
 @date: 2012-09-04
 @author: shell.xu
+@license: BSD-3-clause
 '''
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os, stat, urllib, logging
 from os import path
-from http import *
+import http
 import midware
 from template import Template
 
 def url_test(req):
-    print 'test params:', req.url_param
-    return response_http(200, body='test')
+    logging.info('test params: {}'.format(req.url_param))
+    return http.response_http(200, body='test')
 
 def url_post(req):
     l = str(len(req.readbody()))
-    print 'test post:', l
-    return response_http(200, body=l)
+    logging('test post: {}'.format(l))
+    return http.response_http(200, body=l)
 
 def url_main(req):
     count = req.session.get('count', 0)
-    print 'main url count: %d' % count
-    print 'main url match:', req.url_match
+    logging.info('main url count: {}'.format(count))
+    logging.info('main url match: {}'.format(req.url_match))
     req.session['count'] = count + 1
-    res = response_http(200, 'ok', body='main')
+    res = http.response_http(200, 'ok', body='main')
     res.cache = 100
     return res
 
@@ -54,7 +56,7 @@ def url_path(basedir):
                     d = fi.read(4096)
                     if len(d) == 0: break
                     yield d
-        return response_http(200, body=on_body)
+        return http.response_http(200, body=on_body)
 
     def inner(req):
         url_path, real_path = calc_path(req.url_match[0], basedir)
@@ -65,7 +67,7 @@ def url_path(basedir):
                     return file_app(req, test_path)
             namelist = os.listdir(real_path)
             namelist.sort()
-            return response_http(200, body=tpl.render({
+            return http.response_http(200, body=tpl.render({
                     'namelist': namelist, 'get_stat_str': get_stat_str,
                     'real_path': real_path, 'url_path': url_path}))
         else: return file_app(req, real_path)

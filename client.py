@@ -3,7 +3,9 @@
 '''
 @date: 2013-10-17
 @author: shell.xu
+@license: BSD-3-clause
 '''
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os, sys, socket, logging
 import utils, http
 from contextlib import closing
@@ -45,9 +47,9 @@ def test_upload(url):
 
 def main():
     utils.initlog('DEBUG')
-    print 'download self len:', len(download('http://localhost:8080/self/'))
-    print 'get file self len:', len(getfile('http://localhost:8080/self/'))
-    print 'upload file:', test_upload('http://localhost:8080/post/')
-    print 'post file:', post('http://localhost:8080/post/')
+    print('download self len: {}'.format(len(download('http://localhost:8080/self/'))))
+    print('get file self len: {}'.format(len(getfile('http://localhost:8080/self/'))))
+    print('upload file: {}'.format(test_upload('http://localhost:8080/post/')))
+    print('post file: {}'.format(post('http://localhost:8080/post/')))
 
 if __name__ == '__main__': main()

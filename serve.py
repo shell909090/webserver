@@ -3,11 +3,12 @@
 '''
 @date: 2012-09-03
 @author: shell.xu
+@license: BSD-3-clause
 '''
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os, time, socket, signal, logging
 import utils, http
 from datetime import datetime
-from urlparse import urlparse
 from threading import Thread
 
 class ThreadServer(object):

@@ -3,8 +3,17 @@
 '''
 @date: 2012-04-26
 @author: shell.xu
+@license: BSD-3-clause
 '''
-import sys, socket, logging, urlparse, datetime, threading
+from __future__ import absolute_import, division, print_function, unicode_literals
+import sys, socket, logging, datetime, threading
+try:
+    from urlparse import urlparse
+except ImportError:
+    from urllib.parse import urlparse
+
+if sys.version_info.major == 3:
+    basestring = str
 
 CHUNK_MIN   = 1024
 BUFSIZE     = 8192
@@ -317,7 +326,7 @@ class ResponseFile(FileBase):
         return int(self.resp.code)
 
 def parseurl(url):
-    u = urlparse.urlparse(url)
+    u = urlparse(url)
     uri = u.path
     if u.query: uri += '?' + u.query
     if ':' not in u.netloc:
@@ -345,7 +354,7 @@ class WebServer(object):
         self.accessfile.flush()
 
     def http_handler(self, req):
-        req.url = urlparse.urlparse(req.uri)
+        req.url = urlparse(req.uri)
         res = self.application(req)
         if res is None:
             res = response_http(500, body='service internal error')
@@ -365,8 +374,10 @@ class WebServer(object):
                     if req:
                         if res is True: res = None
                         self.record_access(req, res, addr)
-        except (EOFError, socket.error): logging.info('network error')
-        except Exception, err: logging.exception('unknown')
+        except EOFError, socket.error:
+            logging.info('network error')
+        except Exception as err:
+            logging.exception('unknown')
         finally: sock.close()
 
 class WSGIServer(WebServer):
@@ -386,7 +397,7 @@ class WSGIServer(WebServer):
         return env
 
     def http_handler(self, req):
-        req.url = urlparse.urlparse(req.uri)
+        req.url = urlparse(req.uri)
         env = self.req2env(req)
 
         res = response_http(500)
@@ -403,7 +414,7 @@ class WSGIServer(WebServer):
             for b in chunked(self.application(env, start_response)):
                 req.stream.write(b)
             req.stream.flush()
-        except Exception, err:
+        except Exception as err:
             if not res.sent: res.send_header(req.stream)
             raise
         finally: # empty all send body
