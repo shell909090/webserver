@@ -24,7 +24,9 @@ def url_main(req):
     print 'main url count: %d' % count
     print 'main url match:', req.url_match
     req.session['count'] = count + 1
-    return response_http(200, 'ok', cache=100, body='main')
+    res = response_http(200, 'ok', body='main')
+    res.cache = 100
+    return res
 
 def url_path(basedir):
     tpl = Template(template = '{%import os%}{%from os import path%}<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/></head><body><table><thead><tr><td>file name</td><td>file mode</td><td>file size</td></tr></thead><tbody>{%for name in namelist:%}{%name=name.decode("utf-8")%}{%stat_info = os.lstat(path.join(real_path, name))%}<tr><td><a href="{%=path.join(url_path, name).replace(os.sep, "/")%}">{%=name%}</a></td><td>{%=get_stat_str(stat_info.st_mode)%}</td><td>{%=stat_info.st_size%}</td></tr>{%end%}</tbody></table></body>')
