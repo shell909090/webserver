@@ -14,7 +14,8 @@ if sys.version_info.major == 3:
     basestring = str
 
 
-LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s](%(module)s:%(lineno)d): %(message)s'
+LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s]\
+(%(module)s:%(lineno)d): %(message)s'
 
 
 def initlog(lv, logfile=None, stream=None, longdate=False):

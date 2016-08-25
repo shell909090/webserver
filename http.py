@@ -110,7 +110,7 @@ def chunked_body(stream):
 
 
 def length_body(stream, length):
-    for i in xrange(0, length, BUFSIZE):
+    for i in range(0, length, BUFSIZE):
         d = stream.read(min(length - i, BUFSIZE))
         if not d:
             raise EOFError
@@ -482,7 +482,7 @@ class WSGIServer(WebServer):
             if len(r) > 1:
                 res.phrase = r[1]
             else:
-                res.phrase = DEFAULT_PAGES[resp.code][0]
+                res.phrase = DEFAULT_PAGES[res.code][0]
             for k, v in headers:
                 res.add(k, v)
             res.add('Transfer-Encoding', 'chunked')
