@@ -5,31 +5,42 @@
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division, print_function, unicode_literals
-import re, time, heapq, random, pickle, logging
+from __future__ import absolute_import, division,\
+    print_function, unicode_literals
+import re
+import time
+import heapq
+import random
+import pickle
+import logging
 try:
     from urllib import quote, unquote
 except ImportError:
     from urllib.parse import quote, unquote
-from http import *
+import http
+
 
 class Dispatch(object):
+
     def __init__(self, urlmap=None):
-        self.urlmap = [[re.compile(i[0]),] + list(i[1:]) for i in urlmap]
+        self.urlmap = [[re.compile(i[0]), ] + list(i[1:]) for i in urlmap]
 
     def __call__(self, req):
         for o in self.urlmap:
             m = o[0].match(req.url.path)
-            if not m: continue
+            if not m:
+                continue
             req.url_match = m.groups()
             req.url_param = o[2:]
             return o[1](req)
         return self.default_handler(req)
 
     def default_handler(req):
-        return response_http(404, body='File Not Found')
+        return http.response_http(404, body='File Not Found')
+
 
 class Cache(object):
+
     def __call__(self, func):
         def inner(req):
             pd = self.get_data(req.url.path)
@@ -50,8 +61,12 @@ class ObjHeap(object):
     thx for Evan Prodromou <evan@bad.dynu.ca>. '''
 
     class __node(object):
-        def __init__(self, k, v, f): self.k, self.v, self.f = k, v, f
-        def __cmp__(self, o): return self.f > o.f
+
+        def __init__(self, k, v, f):
+            self.k, self.v, self.f = k, v, f
+
+        def __cmp__(self, o):
+            return self.f > o.f
 
     def __init__(self, size):
         self.size, self.f = size, 0
@@ -74,27 +89,33 @@ class ObjHeap(object):
             while len(self.__heap) >= self.size:
                 del self.__dict[heapq.heappop(self.__heap).k]
                 self.f = 0
-                for n in self.__heap: n.f = 0
+                for n in self.__heap:
+                    n.f = 0
             n = self.__node(k, v, self.f)
             self.__dict[k] = n
             heapq.heappush(self.__heap, n)
+
     def __getitem__(self, k):
         n = self.__dict[k]
         self.f += 1
         n.f = self.f
         heapq.heapify(self.__heap)
         return n.v
+
     def __delitem__(self, k):
         n = self.__dict[k]
         del self.__dict[k]
         self.__heap.remove(n)
         heapq.heapify(self.__heap)
         return n.v
+
     def __iter__(self):
         c = self.__heap[:]
-        while len(c): yield heapq.heappop(c).k
+        while len(c):
+            yield heapq.heappop(c).k
         raise StopIteration
-    
+
+
 class MemoryCache(Cache):
 
     def __init__(self, size):
@@ -102,9 +123,12 @@ class MemoryCache(Cache):
         self.oh = ObjHeap(size)
 
     def get_data(self, k):
-        try: o = self.oh[k]
-        except KeyError: return None
-        if o[1] >= time.time(): return o[0]
+        try:
+            o = self.oh[k]
+        except KeyError:
+            return None
+        if o[1] >= time.time():
+            return o[0]
         del self.oh[k]
         return None
 
@@ -113,37 +137,57 @@ class MemoryCache(Cache):
 
 random.seed()
 alpha = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/'
-def get_rnd_sess(): return ''.join(random.sample(alpha, 32))
 
-def get_params_dict(data, sp = '&'):
-    if not data: return {}
+
+def get_rnd_sess():
+    return ''.join(random.sample(alpha, 32))
+
+
+def get_params_dict(data, sp='&'):
+    if not data:
+        return {}
     rslt = {}
     for p in data.split(sp):
         i = p.strip().split('=', 1)
         rslt[i[0]] = unquote(i[1])
     return rslt
 
+
 class Cookie(object):
+
     def __init__(self, cookie):
-        if not cookie: self.v = {}
-        else: self.v = get_params_dict(cookie, ';')
+        if not cookie:
+            self.v = {}
+        else:
+            self.v = get_params_dict(cookie, ';')
         self.m = set()
 
-    def get(self, k, d): return self.v.get(k, d)
-    def __contains__(self, k): return k in self.v
-    def __getitem__(self, k): return self.v[k]
+    def get(self, k, d):
+        return self.v.get(k, d)
+
+    def __contains__(self, k):
+        return k in self.v
+
+    def __getitem__(self, k):
+        return self.v[k]
+
     def __delitem__(self, k):
         self.m.add(k)
         del self.v[k]
+
     def __setitem__(self, k, v):
         self.m.add(k)
         self.v[k] = v
+
     def set_cookie(self, res):
         for k in self.m:
             res.add('Set-Cookie', '%s=%s' % (k, quote(self.v[k])))
 
+
 class Session(object):
-    def __init__(self, timeout): self.exp = timeout
+
+    def __init__(self, timeout):
+        self.exp = timeout
 
     def __call__(self, func):
         def inner(req):
@@ -153,11 +197,11 @@ class Session(object):
                 sessionid = get_rnd_sess()
                 req.cookie['sessionid'] = sessionid
                 data = None
-            else: data = self.get_data(sessionid)
+            else:
+                data = self.get_data(sessionid)
+            req.session = {}
             if data:
                 req.session = pickle.loads(data)
-            else:
-                req.session = {}
             logging.info('sessionid: %s' % sessionid)
             logging.info('session: %s' % str(req.session))
             res = func(req)
@@ -166,7 +210,9 @@ class Session(object):
             return res
         return inner
 
+
 class MemorySession(Session):
+
     def __init__(self, timeout):
         super(MemorySession, self).__init__(timeout)
         self.sessions = {}

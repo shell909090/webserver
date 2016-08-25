@@ -5,16 +5,19 @@
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import absolute_import, division,\
+    print_function, unicode_literals
 import os
 import sys
+import codecs
 import logging
 import unittest
 
 
-string_type = unicode
 if sys.version_info.major == 3:
     string_type = str
+else:
+    string_type = unicode
 
 
 class TemplateCode(object):
@@ -24,13 +27,15 @@ class TemplateCode(object):
         self.deep, self.rslt, self.defs = 0, [], []
 
     def str(self, s):
-        if not s: return
+        if not s:
+            return
         self.rslt.append(
             u'{}write(u\'\'\'{}\'\'\')'.format(self.TAB * self.deep, s))
 
     def code(self, s):
         r = self.map_code(s)
-        if not r: return
+        if not r:
+            return
         self.rslt.append(r)
 
     def map_code(self, s):
@@ -52,7 +57,7 @@ class TemplateCode(object):
             return
         elif s.startswith(u'import'):
             self.defs.append(s + u'\n')
-            return 
+            return
         return self.TAB * tab + s
 
     def include(self, filepath):
@@ -136,9 +141,8 @@ class Template(object):
 class TestTemplate(unittest.TestCase):
     template = u'''<html><head><title>{%=r%}</title></head>
 <body><table><tr><td>col1</td><td>col2</td></tr>
-{%for i in objs:%}
-<tr><td>{%=i[0]%}</td><td>{%=i[1]%}</td></tr>{%end%}
-</table></body></html>'''
+{%for i in objs:%}<tr><td>{%=i[0]%}</td><td>{%=i[1]%}</td></tr>
+{%end%}</table></body></html>'''
     result = u'''<html><head><title>test</title></head>
 <body><table><tr><td>col1</td><td>col2</td></tr>
 <tr><td>1</td><td>2</td></tr>

@@ -5,23 +5,28 @@
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division, print_function, unicode_literals
-import os, sys, socket, logging
-import utils, http
+from __future__ import absolute_import, division,\
+    print_function, unicode_literals
+import utils
+import http
 from contextlib import closing
+
 
 def download(url):
     with closing(http.download(url)) as resp:
         return resp.readbody()
 
+
 def getfile(url):
     with http.download(url).makefile() as f:
         return f.read()
+
 
 def post(url):
     with open('http.py', 'rb') as fi:
         with http.download(url, data=fi).makefile() as f:
             return f.read()
+
 
 def upload(url):
     host, port, uri = http.parseurl(url)
@@ -37,6 +42,7 @@ def upload(url):
         stream.close()
         raise
 
+
 def test_upload(url):
     f = upload(url)
     with f:
@@ -45,11 +51,15 @@ def test_upload(url):
     with closing(f.get_response()) as resp:
         return resp.readbody()
 
+
 def main():
     utils.initlog('DEBUG')
-    print('download self len: {}'.format(len(download('http://localhost:8080/self/'))))
-    print('get file self len: {}'.format(len(getfile('http://localhost:8080/self/'))))
+    print('download self len: {}'.format(
+        len(download('http://localhost:8080/self/'))))
+    print('get file self len: {}'.format(
+        len(getfile('http://localhost:8080/self/'))))
     print('upload file: {}'.format(test_upload('http://localhost:8080/post/')))
     print('post file: {}'.format(post('http://localhost:8080/post/')))
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    main()

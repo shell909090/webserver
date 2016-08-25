@@ -5,44 +5,75 @@
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division, print_function, unicode_literals
-import os, copy, stat, http, urllib
+from __future__ import absolute_import, division,\
+    print_function, unicode_literals
+import os
+import copy
+import stat
+import http
+import urllib
+import unittest
 from os import path
 import web
 from template import Template
 
+
 class Test(object):
+
     def GET(self, name):
         print('test params: {}'.format(name))
         return 'test'
 
+
 class Post(object):
+
     def POST(self, name):
         l = len(web.data())
         print('test post: {}'.format(l))
         return str(l)
 
+
 class Main(object):
+
     def GET(self, name):
         print('main url count: {}'.format(session.count))
         print('main url match: {}'.format(name))
         session.count += 1
+        body = 'main page, count: {}, match: {}, param: {}'.format(
+            session.count, name)
+        return body
+
 
 def get_stat_str(mode):
     stat_list = []
-    if stat.S_ISDIR(mode): stat_list.append("d")
-    if stat.S_ISREG(mode): stat_list.append("f")
-    if stat.S_ISLNK(mode): stat_list.append("l")
-    if stat.S_ISSOCK(mode): stat_list.append("s")
+    if stat.S_ISDIR(mode):
+        stat_list.append("d")
+    if stat.S_ISREG(mode):
+        stat_list.append("f")
+    if stat.S_ISLNK(mode):
+        stat_list.append("l")
+    if stat.S_ISSOCK(mode):
+        stat_list.append("s")
     return ''.join(stat_list)
 
+
 class Path(object):
-    tpl = Template(template = '{%import os%}{%from os import path%}<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/></head><body><table><thead><tr><td>file name</td><td>file mode</td><td>file size</td></tr></thead><tbody>{%for name in namelist:%}{%name=name.decode("utf-8")%}{%stat_info = os.lstat(path.join(real_path, name))%}<tr><td><a href="{%=path.join(url_path, name).replace(os.sep, "/")%}">{%=name%}</a></td><td>{%=get_stat_str(stat_info.st_mode)%}</td><td>{%=stat_info.st_size%}</td></tr>{%end%}</tbody></table></body>')
-    index_set = ['index.html',]
+    tplstr = '''{%import os%}{%from os import path%}<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+</head><body><table><thead><tr><td>file name</td><td>file mode</td>
+<td>file size</td></tr></thead><tbody>{%for name in namelist:%}
+{%stat_info = os.lstat(path.join(real_path, name))%}\
+<tr><td><a href="{%=path.join(url_path, name).replace(os.sep, "/")%}">\
+{%=name%}</a></td><td>{%=get_stat_str(stat_info.st_mode)%}</td><td>\
+{%=stat_info.st_size%}</td></tr>{%end%}
+</tbody></table></body>'''
+    tpl = Template(template=tplstr)
+    index_set = ['index.html', ]
 
     def file_app(self, filepath):
         with open(filepath, 'rb') as fi:
-            for b in http.file_source(fi): yield b
+            for b in http.file_source(fi):
+                yield b
 
     def GET(self, filepath):
         url_path = urllib.unquote(filepath)
@@ -62,6 +93,7 @@ class Path(object):
             'namelist': namelist, 'get_stat_str': get_stat_str,
             'real_path': real_path, 'url_path': url_path})
 
+
 def StaticPath(basedir):
     p = copy.copy(Path)
     p.basedir = path.abspath(path.realpath(path.expanduser(basedir)))
@@ -76,3 +108,9 @@ app = web.application((
 
 session = web.session.Session(
     app, web.session.DiskStore('sessions'), initializer={'count': 0})
+
+
+class TestAppWebpy(unittest.TestCase):
+
+    def test_main(self):
+        pass
