@@ -522,10 +522,7 @@ class SocketPool(object):
         if stream is None:
             logging.debug('create new conn: %s:%d' % (host, addr[1]))
             conn = socket.socket()
-            try:
-                conn.connect(addr)
-            except IOError:
-                return
+            conn.connect(addr)
             stream = conn.makefile()
         return stream
 

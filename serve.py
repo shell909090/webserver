@@ -11,8 +11,8 @@ import time
 import socket
 import signal
 import logging
-from .import utils
-from .import http
+import utils
+import http
 from threading import Thread
 
 

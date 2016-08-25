@@ -11,6 +11,7 @@ from __future__ import absolute_import, division,\
 import unittest
 from apps import TestApp
 from app_webpy import TestAppWebpy
+from client import TestClient
 from template import TestTemplate
 
 if __name__ == '__main__':
