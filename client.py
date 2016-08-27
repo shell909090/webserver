@@ -33,7 +33,7 @@ def upload(url):
     req.remote = (host, port)
     req['Host'] = host
     req['Transfer-Encoding'] = 'chunked'
-    stream = http.connector.connect(req.remote)
+    stream = http.connector(req.remote)
     try:
         req.send_header(stream)
         return http.RequestWriteFile(stream)
@@ -46,7 +46,7 @@ def inner_main():
     import apps
     ws = http.WebServer(apps.dis)
     from gevent.server import StreamServer
-    ws = StreamServer(('', 8080), ws.handler)
+    ws = StreamServer(('', 18080), ws.handler)
 
     import gevent
     gevent.spawn(ws.serve_forever)
@@ -59,28 +59,29 @@ inner_main()
 class TestClient(unittest.TestCase):
 
     def test_main(self):
-        body = download('http://localhost:8080/urlmatch')
+        body = download('http://localhost:18080/urlmatch')
         self.assertEqual(
             body,
             'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
 
     def test_getfile(self):
-        body = getfile('http://localhost:8080/urlmatch')
+        body = getfile('http://localhost:18080/urlmatch')
         self.assertEqual(
             body,
             'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
 
     def test_cached(self):
         for i in range(12):
-            body = download('http://localhost:8080/cached/{}'.format(int(i/3)))
+            body = download(
+                'http://localhost:18080/cached/{}'.format(int(i/3)))
             self.assertEqual(body, 'cached')
 
         time.sleep(1)
-        body = download('http://localhost:8080/cached/abc')
+        body = download('http://localhost:18080/cached/abc')
         self.assertEqual(body, 'cached')
 
     def test_test(self):
-        body = download('http://localhost:8080/test/testmatch')
+        body = download('http://localhost:18080/test/testmatch')
         self.assertEqual(
             body,
             'main page, count: 0, match: ["testmatch"], param: ["test param"]')
@@ -88,14 +89,14 @@ class TestClient(unittest.TestCase):
     def test_post(self):
         with open('http.py', 'rb') as fi:
             data = fi.read()
-        with http.download('http://localhost:8080/post/postmatch',
+        with http.download('http://localhost:18080/post/postmatch',
                            data=data).makefile() as f:
             body = f.read()
         self.assertEqual(body, str(len(data)))
 
     def test_post_file(self):
         with open('http.py', 'rb') as fi:
-            with http.download('http://localhost:8080/post/postmatch',
+            with http.download('http://localhost:18080/post/postmatch',
                                data=fi).makefile() as f:
                 body = f.read()
         with open('http.py', 'rb') as fi:
@@ -105,7 +106,7 @@ class TestClient(unittest.TestCase):
     def test_upload(self):
         with open('http.py', 'rb') as fi:
             data = fi.read()
-        with upload('http://localhost:8080/post/postmatch') as f:
+        with upload('http://localhost:18080/post/postmatch') as f:
             f.write(data)
         with closing(f.get_response()) as resp:
             self.assertEqual(resp.readbody(), str(len(data)))

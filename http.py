@@ -141,9 +141,12 @@ class BufferedFile(object):
 class HttpMessage(object):
 
     def __init__(self):
-        self.headers, self.sent = {}, False
-        self.length, self.body = None, None
-        self.keepalive, self.cache = True, 0
+        self.headers = {}
+        self.sent = False
+        self.length = None
+        self.body = None
+        self.keepalive = True
+        self.cache = 0
 
     def add(self, k, v):
         self.headers.setdefault(k, [])
@@ -292,7 +295,8 @@ class Request(HttpMessage):
     def get_startline(self):
         return ' '.join((self.method, self.uri, self.version))
 
-    def hasbody(self): return False
+    def hasbody(self):
+        return False
 
 
 def request_http(uri, method=None, version=None, headers=None, body=None):
@@ -334,18 +338,17 @@ class Response(HttpMessage):
         HttpMessage.__init__(self)
         self.version, self.code, self.phrase = version, int(code), phrase
 
-    def __nonzero__(self): return self.keepalive
+    def __nonzero__(self):
+        return self.keepalive
 
     def close(self):
-        if self.keepalive:
-            connector.release(self.stream)
-        else:
-            self.stream.close()
+        return self.stream.close()
 
     def get_startline(self):
         return ' '.join((self.version, str(self.code), self.phrase))
 
-    def hasbody(self): return self.code not in CODE_NOBODY
+    def hasbody(self):
+        return self.code not in CODE_NOBODY
 
     def makefile(self):
         return ResponseFile(self)
@@ -379,8 +382,10 @@ def response_to(req, code, phrase=None, headers=None, body=None):
 class ResponseFile(FileBase):
 
     def __init__(self, resp):
-        self.resp, self.f = resp, BufferedFile(resp.body)
-        self.read, self.close = self.f.read, resp.close
+        self.resp = resp
+        self.f = BufferedFile(resp.body)
+        self.read = self.f.read
+        self.close = resp.close
 
     def getcode(self):
         return int(self.resp.code)
@@ -492,11 +497,9 @@ class WSGIServer(WebServer):
             for b in chunked(self.application(env, start_response)):
                 req.stream.write(b)
             req.stream.flush()
-        except Exception as err:
+        finally:  # empty all send body
             if not res.sent:
                 res.send_header(req.stream)
-            raise
-        finally:  # empty all send body
             for b in req.body:
                 pass
         return res
@@ -505,30 +508,35 @@ class WSGIServer(WebServer):
 class SocketPool(object):
 
     def __init__(self, max_addr=-1):
-        self.lock = threading.RLock()
+        self._lock = threading.RLock()
         self.buf, self.max_addr = {}, max_addr
 
     def setmax(self, max_addr=-1):
         self.max_addr = max_addr
 
-    def connect(self, addr):
-        host, stream = addr[0], None
+    def __call__(self, addr):
+        host = addr[0]
         addr = (socket.gethostbyname(host), addr[1])
-        with self.lock:
+        stream = None
+        with self._lock:
             if self.buf.get(addr):
                 stream = self.buf[addr].pop(0)
                 logging.debug('acquire conn %s:%d size %d' % (
                     host, addr[1], len(self.buf[addr])))
         if stream is None:
             logging.debug('create new conn: %s:%d' % (host, addr[1]))
-            conn = socket.socket()
-            conn.connect(addr)
-            stream = conn.makefile()
+            stream = connect_addr(addr)
+            stream._close = stream.close
+            stream.close = lambda: self.release(stream)
         return stream
 
     def release(self, stream):
-        addr = stream._sock.getpeername()
-        with self.lock:
+        try:
+            addr = stream._sock.getpeername()
+        except socket.error:
+            logging.debug('free conn.')
+            return
+        with self._lock:
             self.buf.setdefault(addr, [])
             if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
                 self.buf[addr].append(stream)
@@ -536,23 +544,30 @@ class SocketPool(object):
                     addr[0], addr[1], len(self.buf[addr])))
                 return
         logging.debug('free conn %s:%d.' % (addr[0], addr[1]))
-        stream.close()
+        stream._close()
 
-connector = SocketPool()
+# connector = SocketPool()
+
+
+def connect_addr(addr):
+    s = socket.socket()
+    s.connect(addr)
+    return s.makefile()
+
+connector = connect_addr
 
 
 def round_trip(req):
     try:
-        req.stream = connector.connect(req.remote)
+        req.stream = connector(req.remote)
     except IOError:
         return response_to(req, 502)
     try:
         req.sendto(req.stream)
         req.stream.flush()
         return Response.recvfrom(req.stream)
-    except:
+    finally:
         req.stream.close()
-        raise
 
 
 def download(url, method=None, headers=None, data=None):
