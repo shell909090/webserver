@@ -380,8 +380,9 @@ def response_http(code, phrase=None, version=None,
 
 
 def response_to(req, code, phrase=None, headers=None, body=None):
-    res = response_http(code, phrase=phrase, version=req.version,
-                        headers=headers, body=body)
+    res = response_http(
+        code, phrase=phrase, version=req.version,
+        headers=headers, body=body)
     res.keepalive = req.keepalive
     res.sendto(req.stream)
     return res
@@ -415,10 +416,14 @@ class WebServer(object):
 
     def __init__(self, application, accesslog=None):
         self.application = application
+        if accesslog is None:
+            return
         if accesslog == '':
             self.accessfile = sys.stdout
-        elif accesslog:
+        elif isinstance(accesslog, unicode):
             self.accessfile = open(accesslog, 'a')
+        else:
+            self.accessfile = accesslog
 
     def record_access(self, req, res, addr):
         if not hasattr(self, 'accessfile'):
@@ -427,10 +432,7 @@ class WebServer(object):
             code, length = 500, None
         else:
             code, length = res.code, res.length
-        if length is None:
-            length = '-'
-        else:
-            length = str(length)
+        length = '-' if length is None else str(length)
         self.accessfile.write(
             '%s:%d - - [%s] "%s" %d %s "-" %s\n' % (
                 addr[0], addr[1], datetime.datetime.now().isoformat(),
@@ -507,56 +509,58 @@ class WSGIServer(WebServer):
             for b in chunked(self.application(env, start_response)):
                 req.stream.write(b)
             req.stream.flush()
-        finally:  # empty all send body
+        finally:
             if not res.sent:
                 res.send_header(req.stream)
-            for b in req.body:
-                pass
+            # empty all send body if exists
+            if req.body:
+                for b in req.body:
+                    pass
         return res
 
 
-class SocketPool(object):
+# class SocketPool(object):
 
-    def __init__(self, max_addr=-1):
-        self._lock = threading.RLock()
-        self.buf, self.max_addr = {}, max_addr
+#     def __init__(self, max_addr=-1):
+#         self._lock = threading.RLock()
+#         self.buf, self.max_addr = {}, max_addr
 
-    def setmax(self, max_addr=-1):
-        self.max_addr = max_addr
+#     def setmax(self, max_addr=-1):
+#         self.max_addr = max_addr
 
-    def __call__(self, addr):
-        host = addr[0]
-        addr = (socket.gethostbyname(host), addr[1])
-        stream = None
-        with self._lock:
-            if self.buf.get(addr):
-                stream = self.buf[addr].pop(0)
-                logging.debug(
-                    'acquire conn %s:%d size %d',
-                    host, addr[1], len(self.buf[addr]))
-        if stream is None:
-            logging.debug('create new conn: %s:%d', host, addr[1])
-            stream = connect_addr(addr)
-            stream._close = stream.close
-            stream.close = lambda: self.release(stream)
-        return stream
+#     def __call__(self, addr):
+#         host = addr[0]
+#         addr = (socket.gethostbyname(host), addr[1])
+#         stream = None
+#         with self._lock:
+#             if self.buf.get(addr):
+#                 stream = self.buf[addr].pop(0)
+#                 logging.debug(
+#                     'acquire conn %s:%d size %d',
+#                     host, addr[1], len(self.buf[addr]))
+#         if stream is None:
+#             logging.debug('create new conn: %s:%d', host, addr[1])
+#             stream = connect_addr(addr)
+#             stream._close = stream.close
+#             stream.close = lambda: self.release(stream)
+#         return stream
 
-    def release(self, stream):
-        try:
-            addr = stream._sock.getpeername()
-        except socket.error:
-            logging.debug('free conn.')
-            return
-        with self._lock:
-            self.buf.setdefault(addr, [])
-            if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
-                self.buf[addr].append(stream)
-                logging.debug(
-                    'release conn %s:%d back size %d',
-                    addr[0], addr[1], len(self.buf[addr]))
-                return
-        logging.debug('free conn %s:%d.', addr[0], addr[1])
-        stream._close()
+#     def release(self, stream):
+#         try:
+#             addr = stream._sock.getpeername()
+#         except socket.error:
+#             logging.debug('free conn.')
+#             return
+#         with self._lock:
+#             self.buf.setdefault(addr, [])
+#             if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
+#                 self.buf[addr].append(stream)
+#                 logging.debug(
+#                     'release conn %s:%d back size %d',
+#                     addr[0], addr[1], len(self.buf[addr]))
+#                 return
+#         logging.debug('free conn %s:%d.', addr[0], addr[1])
+#         stream._close()
 
 # connector = SocketPool()
 

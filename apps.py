@@ -173,4 +173,4 @@ class TestApp(unittest.TestCase):
         req = http.request_http('/self/')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
-        self.assertIn(b'serve.py', resp.body)
+        self.assertIn(b'http.py', resp.body)

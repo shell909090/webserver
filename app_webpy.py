@@ -12,49 +12,30 @@ import copy
 import stat
 import http
 import urllib
+import logging
 import unittest
 from os import path
 import web
 from template import Template
 
 
-class Test(object):
+class Main(object):
 
     def GET(self, name):
-        print('test params: {}'.format(name))
-        return 'test'
+        logging.info('main url count: {}', session.count)
+        logging.info('main url match: {}', name)
+        body = 'main page, count: {}, match: {}'.format(
+            session.count, name)
+        session.count += 1
+        return body
 
 
 class Post(object):
 
     def POST(self, name):
-        l = len(web.data())
-        print('test post: {}'.format(l))
+        l = str(len(web.data()))
+        logging.info('test post: {}', l)
         return str(l)
-
-
-class Main(object):
-
-    def GET(self, name):
-        print('main url count: {}'.format(session.count))
-        print('main url match: {}'.format(name))
-        session.count += 1
-        body = 'main page, count: {}, match: {}, param: {}'.format(
-            session.count, name)
-        return body
-
-
-def get_stat_str(mode):
-    stat_list = []
-    if stat.S_ISDIR(mode):
-        stat_list.append("d")
-    if stat.S_ISREG(mode):
-        stat_list.append("f")
-    if stat.S_ISLNK(mode):
-        stat_list.append("l")
-    if stat.S_ISSOCK(mode):
-        stat_list.append("s")
-    return ''.join(stat_list)
 
 
 class Path(object):
@@ -75,6 +56,14 @@ class Path(object):
             for b in http.file_source(fi):
                 yield b
 
+    def get_stat_str(self, mode):
+        stat_map = [
+            (stat.S_ISDIR, 'd'),
+            (stat.S_ISREG, 'f'),
+            (stat.S_ISLNK, 'l'),
+            (stat.S_ISSOCK, 's')]
+        return ''.join([s for f, s in stat_map if f(mode)])
+
     def GET(self, filepath):
         url_path = urllib.unquote(filepath)
         real_path = path.join(self.basedir, url_path.lstrip('/'))
@@ -90,7 +79,7 @@ class Path(object):
         namelist = os.listdir(real_path)
         namelist.sort()
         return self.tpl.render({
-            'namelist': namelist, 'get_stat_str': get_stat_str,
+            'namelist': namelist, 'get_stat_str': self.get_stat_str,
             'real_path': real_path, 'url_path': url_path})
 
 
@@ -100,10 +89,8 @@ def StaticPath(basedir):
     return p
 
 app = web.application((
-    '/test/(.*)', Test,
-    '/test1/(.*)', Test,
-    '/self/(.*)', StaticPath('.'),
     '/post/(.*)', Post,
+    '/self/(.*)', StaticPath('.'),
     '/(.*)', Main))
 
 session = web.session.Session(
@@ -113,4 +100,19 @@ session = web.session.Session(
 class TestAppWebpy(unittest.TestCase):
 
     def test_main(self):
-        pass
+        resp = app.request('/urlmatch')
+        self.assertEqual(resp.status, '200 OK')
+        self.assertEqual(
+            resp.data,
+            b'main page, count: 0, match: urlmatch')
+        self.assertIn('Set-Cookie', resp.headers)
+
+    def test_post(self):
+        resp = app.request('/post/postmatch', method='POST', data='postinfo')
+        self.assertEqual(resp.status, '200 OK')
+        self.assertEqual(resp.data, '8')
+
+    def test_path(self):
+        resp = app.request('/self/')
+        self.assertEqual(resp.status, '200 OK')
+        self.assertIn('http.py', resp.data)
