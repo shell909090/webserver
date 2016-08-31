@@ -12,6 +12,7 @@ import time
 import heapq
 import random
 import pickle
+import string
 import logging
 import unittest
 import functools
@@ -28,15 +29,16 @@ class Dispatch(object):
         self.urlmap = [[re.compile(i[0]), ] + list(i[1:]) for i in urlmap]
 
     def __call__(self, req):
-        for o in self.urlmap:
-            m = o[0].match(req.url.path)
+        for rule in self.urlmap:
+            m = rule[0].match(req.url.path)
             if not m:
                 continue
             req.url_match = m.groups()
-            req.url_param = o[2:]
-            return o[1](req)
+            req.url_param = rule[2:]
+            return rule[1](req)
         return self.default_handler(req)
 
+    @staticmethod
     def default_handler(req):
         return http.response_http(404, body='File Not Found')
 
@@ -45,15 +47,15 @@ class Cache(object):
 
     def __call__(self, func):
         def inner(req):
-            pd = self.get_data(req.url.path)
-            if pd:
+            pickled_data = self.get_data(req.url.path)
+            if pickled_data:
                 logging.info('cache hit in %s', req.url.path)
-                return pickle.loads(pd)
+                return pickle.loads(pickled_data)
             res = func(req)
             if res is not None and res.cache and res.body:
                 res['Cache-Control'] = 'max-age=%d' % res.cache
-                pd = pickle.dumps(res, 2)
-                self.set_data(req.url.path, pd, res.cache)
+                pickled_data = pickle.dumps(res, 2)
+                self.set_data(req.url.path, pickled_data, res.cache)
             return res
         return inner
 
@@ -69,15 +71,19 @@ CAUTION: not satisfy with thread.
     @functools.total_ordering
     class __node(object):
 
-        def __init__(self, k, v, f):
-            self.k, self.v, self.f = k, v, f
+        def __init__(self, k, v, freq):
+            self.k = k
+            self.v = v
+            self.freq = freq
 
         def __lt__(self, o):
-            return self.f < o.f
+            return self.freq < o.freq
 
     def __init__(self, size):
-        self.size, self.f = size, 0
-        self.__dict, self.__heap = {}, []
+        self.size = size
+        self.freq = 0
+        self.__dict = {}
+        self.__heap = []
 
     def __len__(self):
         return len(self.__dict)
@@ -89,23 +95,23 @@ CAUTION: not satisfy with thread.
         if k in self.__dict:
             n = self.__dict[k]
             n.v = v
-            self.f += 1
-            n.f = self.f
+            self.freq += 1
+            n.freq = self.freq
             heapq.heapify(self.__heap)
         else:
             while len(self.__heap) >= self.size:
                 del self.__dict[heapq.heappop(self.__heap).k]
-                self.f = 0
+                self.freq = 0
                 for n in self.__heap:
-                    n.f = 0
-            n = self.__node(k, v, self.f)
+                    n.freq = 0
+            n = self.__node(k, v, self.freq)
             self.__dict[k] = n
             heapq.heappush(self.__heap, n)
 
     def __getitem__(self, k):
         n = self.__dict[k]
-        self.f += 1
-        n.f = self.f
+        self.freq += 1
+        n.freq = self.freq
         heapq.heapify(self.__heap)
         return n.v
 
@@ -183,18 +189,18 @@ class TestHeap(unittest.TestCase):
 
 
 random.seed()
-alpha = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/'
+ALPHABET = string.ascii_letters + string.digits
 
 
 def get_rnd_sess():
-    return ''.join(random.sample(alpha, 32))
+    return ''.join(random.sample(ALPHABET, 32))
 
 
-def get_params_dict(data, sp='&'):
+def get_params_dict(data, delimiter='&'):
     if not data:
         return {}
     rslt = {}
-    for p in data.split(sp):
+    for p in data.split(delimiter):
         i = p.strip().split('=', 1)
         rslt[i[0]] = unquote(i[1])
     return rslt
@@ -204,31 +210,31 @@ class Cookie(object):
 
     def __init__(self, cookie):
         if not cookie:
-            self.v = {}
+            self.__cookies = {}
         else:
-            self.v = get_params_dict(cookie, ';')
-        self.m = set()
+            self.__cookies = get_params_dict(cookie, ';')
+        self.__modified = set()
 
     def get(self, k, d):
-        return self.v.get(k, d)
+        return self.__cookies.get(k, d)
 
     def __contains__(self, k):
-        return k in self.v
+        return k in self.__cookies
 
     def __getitem__(self, k):
-        return self.v[k]
+        return self.__cookies[k]
 
     def __delitem__(self, k):
-        self.m.add(k)
-        del self.v[k]
+        self.__modified.add(k)
+        del self.__cookies[k]
 
     def __setitem__(self, k, v):
-        self.m.add(k)
-        self.v[k] = v
+        self.__modified.add(k)
+        self.__cookies[k] = v
 
     def set_cookie(self, res):
-        for k in self.m:
-            res.add('Set-Cookie', '%s=%s' % (k, quote(self.v[k])))
+        for k in self.__modified:
+            res.add('Set-Cookie', '%s=%s' % (k, quote(self.__cookies[k])))
 
 
 class Session(object):
@@ -249,8 +255,8 @@ class Session(object):
             req.session = {}
             if data:
                 req.session = pickle.loads(data)
-            logging.info('sessionid: %s' % sessionid)
-            logging.info('session: %s' % str(req.session))
+            logging.info('sessionid: %s', sessionid)
+            logging.info('session: %s', str(req.session))
             res = func(req)
             self.set_data(sessionid, pickle.dumps(req.session, 2))
             req.cookie.set_cookie(res)

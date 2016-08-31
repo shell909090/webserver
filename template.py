@@ -15,9 +15,7 @@ import unittest
 
 
 if sys.version_info.major == 3:
-    string_type = str
-else:
-    string_type = unicode
+    unicode = str
 
 
 class TemplateCode(object):
@@ -133,7 +131,7 @@ class Template(object):
     def render(self, kargs):
         ''' 根据参数渲染模板 '''
         b = []
-        kargs['write'] = lambda x: b.append(string_type(x))
+        kargs['write'] = lambda x: b.append(unicode(x))
         eval(self.htmlcode, self.defcodes, kargs)
         return u''.join(b)
 

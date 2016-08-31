@@ -79,66 +79,59 @@ DEFAULT_PAGES = {
     505: ('HTTP Version Not Supported', 'Cannot fulfill request.'),
 }
 
-HTTPTIMEFMT = '%a, %d %b %Y %H:%M:%S %Z'
-
-
-def HttpDate2Time(s):
-    return datetime.datetime.strptime(s, HTTPTIMEFMT)
-
-
-def Time2HttpDate(dt):
-    return dt.strftime(HTTPTIMEFMT)
+# HTTPTIMEFMT = '%a, %d %b %Y %H:%M:%S %Z'
 
 
 def file_source(stream, size=BUFSIZE):
-    d = stream.read(size)
-    while d:
-        yield d
-        d = stream.read(size)
+    data = stream.read(size)
+    while data:
+        yield data
+        data = stream.read(size)
 
 
 def chunked_body(stream):
     chunk = stream.readline().decode(ENCODING).rstrip().split(';')
     chunk_size = int(chunk[0], 16)
     while chunk_size:
-        d = stream.read(chunk_size + 2)
-        if not d:
+        data = stream.read(chunk_size + 2)
+        if not data:
             raise EOFError
-        d = d[:-2]
-        if not d:
+        data = data[:-2]
+        if not data:
             break
-        yield d
+        yield data
         chunk = stream.readline().decode(ENCODING).rstrip().split(';')
         chunk_size = int(chunk[0], 16)
 
 
 def length_body(stream, length):
     for i in range(0, length, BUFSIZE):
-        d = stream.read(min(length - i, BUFSIZE))
-        if not d:
+        data = stream.read(min(length - i, BUFSIZE))
+        if not data:
             raise EOFError
-        yield d
+        yield data
 
 
 def chunked(f):
-    for d in f:
-        yield b'%X\r\n%s\r\n' % (len(d), d)
+    for data in f:
+        yield b'%X\r\n%s\r\n' % (len(data), data)
     yield b'0\r\n\r\n'
 
 
 class BufferedFile(object):
 
-    def __init__(self, it):
-        self.it, self.buf = it, b''
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.buf = b''
 
     def read(self, size=-1):
         try:
             while size == -1 or len(self.buf) < size:
-                self.buf += next(self.it)
+                self.buf += next(self.iterator)
         except StopIteration:
             size = len(self.buf)
-        r, self.buf = self.buf[:size], self.buf[size:]
-        return r
+        data, self.buf = self.buf[:size], self.buf[size:]
+        return data
 
 
 class HttpMessage(object):
@@ -162,6 +155,12 @@ class HttpMessage(object):
         if k not in self:
             raise KeyError
         return self.headers[k][0]
+
+    def header_from_dict(self, d):
+        if not d:
+            return
+        for k, v in d.items():
+            self.headers[k] = [v, ]
 
     def get(self, k, v=None):
         if k not in self:
@@ -205,9 +204,9 @@ class HttpMessage(object):
                 self.add(h.strip(), line.strip())
 
     def debug(self):
-        logging.debug(self.d + self.get_startline())
+        logging.debug(self.direction + self.get_startline())
         for k, v in self:
-            logging.debug('%s%s: %s' % (self.d, k, v))
+            logging.debug('%s%s: %s', self.direction, k, v)
         logging.debug('')
 
     def recvdone(self):
@@ -238,7 +237,7 @@ class HttpMessage(object):
         elif 'Content-Length' in msg:
             msg.length = int(msg['Content-Length'])
             msg.body = length_body(stream, msg.length)
-            logging.debug('recv body on length mode, size: %s' % msg.length)
+            logging.debug('recv body on length mode, size: %s', msg.length)
         elif msg.hasbody():
             msg.body = file_source(stream)
             logging.debug('recv body on close mode')
@@ -257,9 +256,7 @@ class HttpMessage(object):
     def readform(self):
         return dict(i.split('=', 1) for i in self.readbody().split('&'))
 
-    # CAUTION: encoding has been locked to utf-8
-    def sendto(self, stream):
-        self.beforesend()
+    def set_body(self):
         if isinstance(self.body, unicode):
             raise TypeError('body is an unicode, bytes excepted.')
         if hasattr(self.body, 'read'):  # transfer file to chunk
@@ -271,14 +268,19 @@ class HttpMessage(object):
         elif self.body is not None:  # set chunked if use chunk mode
             self['Transfer-Encoding'] = 'chunked'
             self.body = chunked(self.body)
+
+    # CAUTION: encoding has been locked to utf-8
+    def sendto(self, stream):
+        self.beforesend()
+        self.set_body()
         self.send_header(stream)
         if self.body is None:
             return
         if isinstance(self.body, bytes):
             stream.write(self.body)
         elif hasattr(self.body, '__iter__'):
-            for b in self.body:
-                stream.write(b)
+            for block in self.body:
+                stream.write(block)
         else:
             raise Exception('unknown body')
         stream.flush()
@@ -294,7 +296,7 @@ class FileBase(object):
 
 
 class Request(HttpMessage):
-    d = '> '
+    direction = '> '
 
     def __init__(self, method, uri, version):
         HttpMessage.__init__(self)
@@ -313,11 +315,7 @@ def request_http(uri, method=None, version=None, headers=None, body=None):
     if not version:
         version = 'HTTP/1.1'
     req = Request(method, uri, version)
-    if isinstance(headers, dict):
-        headers = headers.items()
-    if headers:
-        for k, v in headers:
-            req.add(k, v)
+    req.header_from_dict(headers)
     if isinstance(body, unicode):
         body = body.encode(ENCODING)
     if body:
@@ -344,7 +342,7 @@ class RequestWriteFile(FileBase):
 
 
 class Response(HttpMessage):
-    d = '< '
+    direction = '< '
 
     def __init__(self, version, code, phrase):
         HttpMessage.__init__(self)
@@ -373,11 +371,7 @@ def response_http(code, phrase=None, version=None,
     if not version:
         version = 'HTTP/1.1'
     res = Response(version, code, phrase)
-    if isinstance(headers, dict):
-        headers = headers.items()
-    if headers:
-        for k, v in headers:
-            res.add(k, v)
+    res.header_from_dict(headers)
     if isinstance(body, unicode):
         body = body.encode(ENCODING)
     if body:
@@ -468,7 +462,7 @@ class WebServer(object):
                         if res is True:
                             res = None
                         self.record_access(req, res, addr)
-        except Exception as err:
+        except Exception:
             logging.exception('unknown')
         finally:
             sock.close()
@@ -476,7 +470,8 @@ class WebServer(object):
 
 class WSGIServer(WebServer):
 
-    def req2env(self, req):
+    @staticmethod
+    def req2env(req):
         env = dict(('HTTP_' + k.upper().replace('-', '_'), v)
                    for k, v in req)
         env['REQUEST_METHOD'] = req.method
@@ -536,10 +531,11 @@ class SocketPool(object):
         with self._lock:
             if self.buf.get(addr):
                 stream = self.buf[addr].pop(0)
-                logging.debug('acquire conn %s:%d size %d' % (
-                    host, addr[1], len(self.buf[addr])))
+                logging.debug(
+                    'acquire conn %s:%d size %d',
+                    host, addr[1], len(self.buf[addr]))
         if stream is None:
-            logging.debug('create new conn: %s:%d' % (host, addr[1]))
+            logging.debug('create new conn: %s:%d', host, addr[1])
             stream = connect_addr(addr)
             stream._close = stream.close
             stream.close = lambda: self.release(stream)
@@ -555,10 +551,11 @@ class SocketPool(object):
             self.buf.setdefault(addr, [])
             if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
                 self.buf[addr].append(stream)
-                logging.debug('release conn %s:%d back size %d' % (
-                    addr[0], addr[1], len(self.buf[addr])))
+                logging.debug(
+                    'release conn %s:%d back size %d',
+                    addr[0], addr[1], len(self.buf[addr]))
                 return
-        logging.debug('free conn %s:%d.' % (addr[0], addr[1]))
+        logging.debug('free conn %s:%d.', addr[0], addr[1])
         stream._close()
 
 # connector = SocketPool()

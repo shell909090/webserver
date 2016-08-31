@@ -19,7 +19,5 @@ from midware import TestHeap
 from template import TestTemplate
 
 
-
-
 if __name__ == '__main__':
     unittest.main()
