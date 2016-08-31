@@ -18,8 +18,11 @@ except ImportError:
     from urllib.parse import urlparse
 
 if sys.version_info.major == 3:
-    basestring = str
+    unicode = str
+else:
+    bytes = str
 
+ENCODING = 'utf-8'
 CHUNK_MIN = 1024
 BUFSIZE = 8192
 CODE_NOBODY = [100, 101, 204, 304]
@@ -95,7 +98,7 @@ def file_source(stream, size=BUFSIZE):
 
 
 def chunked_body(stream):
-    chunk = stream.readline().rstrip().split(';')
+    chunk = stream.readline().decode(ENCODING).rstrip().split(';')
     chunk_size = int(chunk[0], 16)
     while chunk_size:
         d = stream.read(chunk_size + 2)
@@ -105,7 +108,7 @@ def chunked_body(stream):
         if not d:
             break
         yield d
-        chunk = stream.readline().rstrip().split(';')
+        chunk = stream.readline().decode(ENCODING).rstrip().split(';')
         chunk_size = int(chunk[0], 16)
 
 
@@ -119,19 +122,19 @@ def length_body(stream, length):
 
 def chunked(f):
     for d in f:
-        yield '%X\r\n%s\r\n' % (len(d), d)
-    yield '0\r\n\r\n'
+        yield b'%X\r\n%s\r\n' % (len(d), d)
+    yield b'0\r\n\r\n'
 
 
 class BufferedFile(object):
 
     def __init__(self, it):
-        self.it, self.buf = it, ''
+        self.it, self.buf = it, b''
 
     def read(self, size=-1):
         try:
             while size == -1 or len(self.buf) < size:
-                self.buf += self.it.next()
+                self.buf += next(self.it)
         except StopIteration:
             size = len(self.buf)
         r, self.buf = self.buf[:size], self.buf[size:]
@@ -175,15 +178,15 @@ class HttpMessage(object):
         del self.headers[k]
 
     def __iter__(self):
-        for k, l in self.headers.iteritems():
+        for k, l in self.headers.items():
             for v in l:
                 yield k, v
 
     def send_header(self, stream):
-        stream.write(self.get_startline() + '\r\n')
+        stream.write((self.get_startline() + '\r\n').encode(ENCODING))
         for k, v in self:
-            stream.write("%s: %s\r\n" % (k, v))
-        stream.write('\r\n')
+            stream.write(("%s: %s\r\n" % (k, v)).encode(ENCODING))
+        stream.write(b'\r\n')
         stream.flush()
         self.sent = True
 
@@ -196,7 +199,7 @@ class HttpMessage(object):
             if not line:
                 break
             if line[0] not in (' ', '\t'):
-                h, v = line.split(':', 1)
+                h, v = line.decode(ENCODING).split(':', 1)
                 self.add(h.strip(), v.strip())
             else:
                 self.add(h.strip(), line.strip())
@@ -221,9 +224,9 @@ class HttpMessage(object):
         line = stream.readline().strip()
         if len(line) == 0:
             raise EOFError()
-        r = line.split(' ', 2)
+        r = line.decode(ENCODING).split(' ', 2)
         if len(r) < 2:
-            raise Exception('unknown format', r)
+            raise ValueError('unknown format', r)
         if len(r) < 3:
             r.append(DEFAULT_PAGES[int(r[1])][0])
         msg = cls(*r)
@@ -245,8 +248,8 @@ class HttpMessage(object):
         return msg
 
     def readbody(self):
-        if hasattr(self.body, '__iter__'):
-            self.body = ''.join(self.body)
+        if hasattr(self.body, '__iter__') and not isinstance(self.body, bytes):
+            self.body = b''.join(self.body)
         if hasattr(self.body, 'read'):
             self.body = self.body.read()
         return self.body
@@ -254,11 +257,14 @@ class HttpMessage(object):
     def readform(self):
         return dict(i.split('=', 1) for i in self.readbody().split('&'))
 
+    # CAUTION: encoding has been locked to utf-8
     def sendto(self, stream):
         self.beforesend()
+        if isinstance(self.body, unicode):
+            raise TypeError('body is an unicode, bytes excepted.')
         if hasattr(self.body, 'read'):  # transfer file to chunk
             self.body = file_source(self.body)
-        elif isinstance(self.body, basestring):
+        elif isinstance(self.body, bytes):
             self.length = len(self.body)
         if self.length is not None:  # length fit for data and stream
             self['Content-Length'] = str(self.length)
@@ -268,11 +274,13 @@ class HttpMessage(object):
         self.send_header(stream)
         if self.body is None:
             return
-        if hasattr(self.body, '__iter__'):
+        if isinstance(self.body, bytes):
+            stream.write(self.body)
+        elif hasattr(self.body, '__iter__'):
             for b in self.body:
                 stream.write(b)
         else:
-            stream.write(self.body)
+            raise Exception('unknown body')
         stream.flush()
 
 
@@ -310,6 +318,8 @@ def request_http(uri, method=None, version=None, headers=None, body=None):
     if headers:
         for k, v in headers:
             req.add(k, v)
+    if isinstance(body, unicode):
+        body = body.encode(ENCODING)
     if body:
         req.body = body
     return req
@@ -321,10 +331,12 @@ class RequestWriteFile(FileBase):
         self.stream = stream
 
     def write(self, s):
-        self.stream.write('%x\r\n%s\r\n' % (len(s), s,))
+        if isinstance(s, unicode):
+            s = s.decode(ENCODING)
+        self.stream.write(b'%x\r\n%s\r\n' % (len(s), s,))
 
     def close(self):
-        self.stream.write('0\r\n\r\n')
+        self.stream.write(b'0\r\n\r\n')
         self.stream.flush()
 
     def get_response(self):
@@ -366,6 +378,8 @@ def response_http(code, phrase=None, version=None,
     if headers:
         for k, v in headers:
             res.add(k, v)
+    if isinstance(body, unicode):
+        body = body.encode(ENCODING)
     if body:
         res.body = body
     return res
@@ -437,12 +451,15 @@ class WebServer(object):
         return res
 
     def handler(self, sock, addr):
-        stream, res = sock.makefile(), True
+        stream, res = sock.makefile('rwb'), True
         try:
             while res:
                 req, res = None, None
                 try:
-                    req = Request.recvfrom(stream)
+                    try:
+                        req = Request.recvfrom(stream)
+                    except EOFError:
+                        break
                     req.remote = addr
                     res = self.http_handler(req)
                     res.sendto(req.stream)
@@ -451,8 +468,6 @@ class WebServer(object):
                         if res is True:
                             res = None
                         self.record_access(req, res, addr)
-        except (EOFError, socket.error):
-            logging.info('network error')
         except Exception as err:
             logging.exception('unknown')
         finally:
@@ -552,22 +567,22 @@ class SocketPool(object):
 def connect_addr(addr):
     s = socket.socket()
     s.connect(addr)
-    return s.makefile()
+    return s.makefile('rwb')
 
 connector = connect_addr
 
 
+# In Python2, close of req.stream will not harm for resp.stream.read.
+# But in python3, it not work. So leave req.stream there. Use resp.close
+# to close stream.
 def round_trip(req):
     try:
         req.stream = connector(req.remote)
     except IOError:
         return response_to(req, 502)
-    try:
-        req.sendto(req.stream)
-        req.stream.flush()
-        return Response.recvfrom(req.stream)
-    finally:
-        req.stream.close()
+    req.sendto(req.stream)
+    req.stream.flush()
+    return Response.recvfrom(req.stream)
 
 
 def download(url, method=None, headers=None, data=None):

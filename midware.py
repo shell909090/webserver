@@ -13,6 +13,8 @@ import heapq
 import random
 import pickle
 import logging
+import unittest
+import functools
 try:
     from urllib import quote, unquote
 except ImportError:
@@ -57,16 +59,21 @@ class Cache(object):
 
 
 class ObjHeap(object):
-    ''' 使用lru算法的对象缓存容器，感谢Evan Prodromou <evan@bad.dynu.ca>。
-    thx for Evan Prodromou <evan@bad.dynu.ca>. '''
+    '''\
+使用lru算法的对象缓存容器，感谢Evan Prodromou <evan@bad.dynu.ca>。
+注意：非线程安全。
+thx for Evan Prodromou <evan@bad.dynu.ca>.
+CAUTION: not satisfy with thread.
+    '''
 
+    @functools.total_ordering
     class __node(object):
 
         def __init__(self, k, v, f):
             self.k, self.v, self.f = k, v, f
 
-        def __cmp__(self, o):
-            return self.f > o.f
+        def __lt__(self, o):
+            return self.f < o.f
 
     def __init__(self, size):
         self.size, self.f = size, 0
@@ -116,6 +123,13 @@ class ObjHeap(object):
         raise StopIteration
 
 
+# CAUTION: Although MC has expire time, but it will not work until
+# trying to get data back after timeout. So maybe in some case, LRU will
+# squeeze out some data not expired, when some other has expired but
+# used more frequently.
+#
+# To fix this problem, we need another heap to trace when will those data
+# timeout. It's more complex, and far as I see, not necessary.
 class MemoryCache(Cache):
 
     def __init__(self, size):
@@ -134,6 +148,39 @@ class MemoryCache(Cache):
 
     def set_data(self, k, v, exp):
         self.oh[k] = (v, time.time() + exp)
+
+
+class TestHeap(unittest.TestCase):
+
+    def test_CRUD(self):
+        oh = ObjHeap(2)
+        oh[1] = 10
+        self.assertEqual(oh[1], 10)
+        oh[1] = 20
+        self.assertEqual(oh[1], 20)
+        del oh[1]
+        self.assertNotIn(1, oh)
+
+    def test_LRU(self):
+        oh = ObjHeap(2)
+        oh[1] = 10
+        oh[2] = 20
+        oh[3] = 30
+        self.assertNotIn(1, oh)
+
+    def test_MC(self):
+        mc = MemoryCache(2)
+        mc.set_data(1, 10, 1)
+        mc.set_data(2, 20, 1)
+        mc.set_data(3, 30, 1)
+        self.assertEqual(mc.get_data(1), None)
+
+    def test_timeout(self):
+        mc = MemoryCache(2)
+        mc.set_data(1, 10, 0.01)
+        time.sleep(0.1)
+        self.assertEqual(mc.get_data(1), None)
+
 
 random.seed()
 alpha = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/'

@@ -10,9 +10,15 @@ from __future__ import absolute_import, division,\
     print_function, unicode_literals
 import unittest
 from apps import TestApp
-from app_webpy import TestAppWebpy
+try:
+    from app_webpy import TestAppWebpy
+except ImportError:
+    pass # maybe no web.py
 from client import TestClient
+from midware import TestHeap
 from template import TestTemplate
+
+
 
 
 if __name__ == '__main__':

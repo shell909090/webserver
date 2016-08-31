@@ -131,7 +131,7 @@ class TestApp(unittest.TestCase):
         self.assertEqual(resp.code, 200)
         self.assertEqual(
             resp.body,
-            'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
         self.assertIn('Set-Cookie', resp.headers)
 
         req.headers['Cookie'] = resp.headers['Set-Cookie']
@@ -139,20 +139,20 @@ class TestApp(unittest.TestCase):
         self.assertEqual(resp.code, 200)
         self.assertEqual(
             resp.body,
-            'main page, count: 1, match: ["urlmatch"], param: ["main param"]')
+            b'main page, count: 1, match: ["urlmatch"], param: ["main param"]')
 
     def test_cached(self):
         for i in range(12):
             req = http.request_http('/cached/{}'.format(int(i/3)))
             resp = self.ws.http_handler(req)
             self.assertEqual(resp.code, 200)
-            self.assertEqual(resp.body, 'cached')
+            self.assertEqual(resp.body, b'cached')
 
         time.sleep(1)
         req = http.request_http('/cached/abc')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
-        self.assertEqual(resp.body, 'cached')
+        self.assertEqual(resp.body, b'cached')
 
     def test_test(self):
         req = http.request_http('/test/testmatch')
@@ -160,16 +160,17 @@ class TestApp(unittest.TestCase):
         self.assertEqual(resp.code, 200)
         self.assertEqual(
             resp.body,
-            'main page, count: 0, match: ["testmatch"], param: ["test param"]')
+            b'main page, count: 0, match: ["testmatch"], param: ["test param"]'
+        )
 
     def test_post(self):
         req = http.request_http('/post/postmatch', body='postinfo')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
-        self.assertEqual(resp.body, '8')
+        self.assertEqual(resp.body, b'8')
 
     def test_path(self):
         req = http.request_http('/self/')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
-        self.assertIn('serve.py', resp.body)
+        self.assertIn(b'serve.py', resp.body)

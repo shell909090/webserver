@@ -7,11 +7,17 @@
 '''
 from __future__ import absolute_import, division,\
     print_function, unicode_literals
+import sys
 import time
 import http
 import unittest
 from gevent import monkey
 from contextlib import closing
+
+if sys.version_info.major == 3:
+    unicode = str
+else:
+    bytes = str
 
 
 monkey.patch_all()
@@ -62,29 +68,30 @@ class TestClient(unittest.TestCase):
         body = download('http://localhost:18080/urlmatch')
         self.assertEqual(
             body,
-            'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
 
     def test_getfile(self):
         body = getfile('http://localhost:18080/urlmatch')
         self.assertEqual(
             body,
-            'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
 
     def test_cached(self):
         for i in range(12):
             body = download(
                 'http://localhost:18080/cached/{}'.format(int(i/3)))
-            self.assertEqual(body, 'cached')
+            self.assertEqual(body, b'cached')
 
         time.sleep(1)
         body = download('http://localhost:18080/cached/abc')
-        self.assertEqual(body, 'cached')
+        self.assertEqual(body, b'cached')
 
     def test_test(self):
         body = download('http://localhost:18080/test/testmatch')
         self.assertEqual(
             body,
-            'main page, count: 0, match: ["testmatch"], param: ["test param"]')
+            b'main page, count: 0, match: ["testmatch"], param: ["test param"]'
+        )
 
     def test_post(self):
         with open('http.py', 'rb') as fi:
@@ -92,7 +99,7 @@ class TestClient(unittest.TestCase):
         with http.download('http://localhost:18080/post/postmatch',
                            data=data).makefile() as f:
             body = f.read()
-        self.assertEqual(body, str(len(data)))
+        self.assertEqual(body, str(len(data)).encode(http.ENCODING))
 
     def test_post_file(self):
         with open('http.py', 'rb') as fi:
@@ -101,7 +108,7 @@ class TestClient(unittest.TestCase):
                 body = f.read()
         with open('http.py', 'rb') as fi:
             data = fi.read()
-        self.assertEqual(body, str(len(data)))
+        self.assertEqual(body, str(len(data)).encode(http.ENCODING))
 
     def test_upload(self):
         with open('http.py', 'rb') as fi:
@@ -109,4 +116,5 @@ class TestClient(unittest.TestCase):
         with upload('http://localhost:18080/post/postmatch') as f:
             f.write(data)
         with closing(f.get_response()) as resp:
-            self.assertEqual(resp.readbody(), str(len(data)))
+            self.assertEqual(resp.readbody(),
+                             str(len(data)).encode(http.ENCODING))
