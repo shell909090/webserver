@@ -10,7 +10,7 @@ from __future__ import absolute_import, division,\
 import os
 import copy
 import stat
-import http
+import httputil
 import urllib
 import logging
 import unittest
@@ -53,7 +53,7 @@ class Path(object):
 
     def file_app(self, filepath):
         with open(filepath, 'rb') as fi:
-            for b in http.file_source(fi):
+            for b in httputil.file_source(fi):
                 yield b
 
     def get_stat_str(self, mode):
@@ -115,4 +115,4 @@ class TestAppWebpy(unittest.TestCase):
     def test_path(self):
         resp = app.request('/self/')
         self.assertEqual(resp.status, '200 OK')
-        self.assertIn('http.py', resp.data)
+        self.assertIn('httputil.py', resp.data)

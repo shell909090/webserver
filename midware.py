@@ -20,7 +20,7 @@ try:
     from urllib import quote, unquote
 except ImportError:
     from urllib.parse import quote, unquote
-import http
+import httputil
 
 
 class Dispatch(object):
@@ -40,7 +40,7 @@ class Dispatch(object):
 
     @staticmethod
     def default_handler(req):
-        return http.response_http(404, body='File Not Found')
+        return httputil.response_http(404, body='File Not Found')
 
 
 class Cache(object):

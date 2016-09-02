@@ -18,7 +18,7 @@ try:
     from urllib import unquote
 except ImportError:
     from urllib.parse import unquote
-import http
+import httputil
 import midware
 from template import Template
 
@@ -31,12 +31,12 @@ def url_main(req):
     body = 'main page, count: {}, match: {}, param: {}'.format(
         count, json.dumps(req.url_match), json.dumps(req.url_param))
     req.session['count'] = count + 1
-    res = http.response_http(200, body=body)
+    res = httputil.response_http(200, body=body)
     return res
 
 
 def url_cached(req):
-    res = http.response_http(200, body='cached')
+    res = httputil.response_http(200, body='cached')
     res.cache = 0.5
     return res
 
@@ -44,7 +44,7 @@ def url_cached(req):
 def url_post(req):
     l = str(len(req.readbody()))
     logging.info('test post: {}'.format(l))
-    return http.response_http(200, body=l)
+    return httputil.response_http(200, body=l)
 
 
 class url_path(object):
@@ -68,7 +68,7 @@ class url_path(object):
         real_path = path.join(self.basedir, url_path.lstrip('/'))
         real_path = path.abspath(path.realpath(real_path))
         if not real_path.startswith(self.basedir):
-            raise http.HttpException(403)
+            raise httputil.HttpException(403)
         return url_path, real_path
 
     def get_stat_str(self, mode):
@@ -82,9 +82,9 @@ class url_path(object):
     def file_app(self, req, filename):
         def on_body():
             with open(filename, 'rb') as fi:
-                for d in http.file_source(fi):
+                for d in httputil.file_source(fi):
                     yield d
-        return http.response_http(200, body=on_body)
+        return httputil.response_http(200, body=on_body)
 
     def __call__(self, req):
         url_path, real_path = self.calc_path(req.url_match[0])
@@ -99,7 +99,7 @@ class url_path(object):
         body = self.tpl.render({
             'namelist': namelist, 'get_stat_str': self.get_stat_str,
             'real_path': real_path, 'url_path': url_path})
-        return http.response_http(200, body=body)
+        return httputil.response_http(200, body=body)
 
 dis = midware.Dispatch((
     ('/test/(.*)', url_main, 'test param'),
@@ -123,10 +123,10 @@ class TestApp(unittest.TestCase):
 </table></body></html>'''
 
     def setUp(self):
-        self.ws = http.WebServer(dis)
+        self.ws = httputil.WebServer(dis)
 
     def test_main(self):
-        req = http.request_http('/urlmatch')
+        req = httputil.request_http('/urlmatch')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(
@@ -143,19 +143,19 @@ class TestApp(unittest.TestCase):
 
     def test_cached(self):
         for i in range(12):
-            req = http.request_http('/cached/{}'.format(int(i/3)))
+            req = httputil.request_http('/cached/{}'.format(int(i/3)))
             resp = self.ws.http_handler(req)
             self.assertEqual(resp.code, 200)
             self.assertEqual(resp.body, b'cached')
 
         time.sleep(1)
-        req = http.request_http('/cached/abc')
+        req = httputil.request_http('/cached/abc')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b'cached')
 
     def test_test(self):
-        req = http.request_http('/test/testmatch')
+        req = httputil.request_http('/test/testmatch')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(
@@ -164,13 +164,13 @@ class TestApp(unittest.TestCase):
         )
 
     def test_post(self):
-        req = http.request_http('/post/postmatch', body='postinfo')
+        req = httputil.request_http('/post/postmatch', body='postinfo')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b'8')
 
     def test_path(self):
-        req = http.request_http('/self/')
+        req = httputil.request_http('/self/')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
-        self.assertIn(b'http.py', resp.body)
+        self.assertIn(b'httputil.py', resp.body)

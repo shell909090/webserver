@@ -12,7 +12,7 @@ import socket
 import signal
 import logging
 import utils
-import http
+import httputil
 from threading import Thread
 
 
@@ -72,11 +72,11 @@ def main():
     engine = cfg.get('server', 'engine')
     if engine == 'apps':
         import apps
-        ws = http.WebServer(apps.dis, cfg.get('log', 'access'))
+        ws = httputil.WebServer(apps.dis, cfg.get('log', 'access'))
     elif engine == 'wsgi':
         import app_webpy
-        ws = http.WSGIServer(app_webpy.app.wsgifunc(),
-                             cfg.get('log', 'access'))
+        ws = httputil.WSGIServer(app_webpy.app.wsgifunc(),
+                                 cfg.get('log', 'access'))
     else:
         raise Exception('invaild engine %s' % engine)
 

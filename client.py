@@ -9,7 +9,7 @@ from __future__ import absolute_import, division,\
     print_function, unicode_literals
 import sys
 import time
-import http
+import httputil
 import unittest
 import StringIO
 from gevent import monkey
@@ -25,13 +25,13 @@ monkey.patch_all()
 
 
 def download(url):
-    with closing(http.download(url)) as resp:
+    with closing(httputil.download(url)) as resp:
         return resp.readbody()
 
 
 def prepare_apps():
     import apps
-    ws = http.WebServer(apps.dis, StringIO.StringIO())
+    ws = httputil.WebServer(apps.dis, StringIO.StringIO())
     from gevent.server import StreamServer
     ws = StreamServer(('', 18080), ws.handler)
     import gevent
@@ -52,7 +52,7 @@ class TestClientApp(unittest.TestCase):
             b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
 
     def test_getfile(self):
-        with http.download(self.target + '/urlmatch').makefile() as f:
+        with httputil.download(self.target + '/urlmatch').makefile() as f:
             body = f.read()
         self.assertEqual(
             body,
@@ -76,57 +76,57 @@ class TestClientApp(unittest.TestCase):
         )
 
     def test_post(self):
-        with open('http.py', 'rb') as fi:
+        with open('httputil.py', 'rb') as fi:
             data = fi.read()
-        with http.download(
+        with httputil.download(
                 self.target + '/post/postmatch',
                 data=data
         ).makefile() as f:
             body = f.read()
-        self.assertEqual(body, str(len(data)).encode(http.ENCODING))
+        self.assertEqual(body, str(len(data)).encode(httputil.ENCODING))
 
     def test_post_file(self):
-        with open('http.py', 'rb') as fi:
-            with http.download(self.target + '/post/postmatch',
-                               data=fi).makefile() as f:
+        with open('httputil.py', 'rb') as fi:
+            with httputil.download(self.target + '/post/postmatch',
+                                   data=fi).makefile() as f:
                 body = f.read()
-        with open('http.py', 'rb') as fi:
+        with open('httputil.py', 'rb') as fi:
             data = fi.read()
-        self.assertEqual(body, str(len(data)).encode(http.ENCODING))
+        self.assertEqual(body, str(len(data)).encode(httputil.ENCODING))
 
     @staticmethod
     def upload(url):
-        host, port, uri = http.parseurl(url)
-        req = http.request_http(uri, 'POST')
+        host, port, uri = httputil.parseurl(url)
+        req = httputil.request_http(uri, 'POST')
         req.remote = (host, port)
         req['Host'] = host
         req['Transfer-Encoding'] = 'chunked'
-        stream = http.connector(req.remote)
+        stream = httputil.connector(req.remote)
         try:
             req.send_header(stream)
-            return http.RequestWriteFile(stream)
+            return httputil.RequestWriteFile(stream)
         except:
             stream.close()
             raise
 
     def test_upload(self):
-        with open('http.py', 'rb') as fi:
+        with open('httputil.py', 'rb') as fi:
             data = fi.read()
         with self.upload(self.target + '/post/postmatch') as f:
             f.write(data)
         with closing(f.get_response()) as resp:
             self.assertEqual(
                 resp.readbody(),
-                str(len(data)).encode(http.ENCODING))
+                str(len(data)).encode(httputil.ENCODING))
 
     def test_path(self):
         body = download(self.target + '/self/')
-        self.assertIn(b'http.py', body)
+        self.assertIn(b'httputil.py', body)
 
 
 def prepare_webpy():
     import app_webpy
-    ws = http.WSGIServer(app_webpy.app.wsgifunc())
+    ws = httputil.WSGIServer(app_webpy.app.wsgifunc())
     from gevent.server import StreamServer
     ws = StreamServer(('', 18081), ws.handler)
     import gevent
@@ -147,15 +147,15 @@ class TestClientWebpy(unittest.TestCase):
             b'main page, count: 0, match: urlmatch')
 
     def test_post(self):
-        with open('http.py', 'rb') as fi:
+        with open('httputil.py', 'rb') as fi:
             data = fi.read()
-        with http.download(
+        with httputil.download(
                 self.target + '/post/postmatch',
                 data=data
         ).makefile() as f:
             body = f.read()
-        self.assertEqual(body, str(len(data)).encode(http.ENCODING))
+        self.assertEqual(body, str(len(data)).encode(httputil.ENCODING))
 
     def test_path(self):
         body = download(self.target + '/self/')
-        self.assertIn(b'http.py', body)
+        self.assertIn(b'httputil.py', body)
