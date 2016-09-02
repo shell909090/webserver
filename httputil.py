@@ -11,7 +11,6 @@ import sys
 import socket
 import logging
 import datetime
-import threading
 try:
     from urlparse import urlparse
 except ImportError:
@@ -517,52 +516,6 @@ class WSGIServer(WebServer):
                 for b in req.body:
                     pass
         return res
-
-
-# class SocketPool(object):
-
-#     def __init__(self, max_addr=-1):
-#         self._lock = threading.RLock()
-#         self.buf, self.max_addr = {}, max_addr
-
-#     def setmax(self, max_addr=-1):
-#         self.max_addr = max_addr
-
-#     def __call__(self, addr):
-#         host = addr[0]
-#         addr = (socket.gethostbyname(host), addr[1])
-#         stream = None
-#         with self._lock:
-#             if self.buf.get(addr):
-#                 stream = self.buf[addr].pop(0)
-#                 logging.debug(
-#                     'acquire conn %s:%d size %d',
-#                     host, addr[1], len(self.buf[addr]))
-#         if stream is None:
-#             logging.debug('create new conn: %s:%d', host, addr[1])
-#             stream = connect_addr(addr)
-#             stream._close = stream.close
-#             stream.close = lambda: self.release(stream)
-#         return stream
-
-#     def release(self, stream):
-#         try:
-#             addr = stream._sock.getpeername()
-#         except socket.error:
-#             logging.debug('free conn.')
-#             return
-#         with self._lock:
-#             self.buf.setdefault(addr, [])
-#             if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
-#                 self.buf[addr].append(stream)
-#                 logging.debug(
-#                     'release conn %s:%d back size %d',
-#                     addr[0], addr[1], len(self.buf[addr]))
-#                 return
-#         logging.debug('free conn %s:%d.', addr[0], addr[1])
-#         stream._close()
-
-# connector = SocketPool()
 
 
 def connect_addr(addr):
