@@ -6,7 +6,7 @@
 
 # 授权 #
 
-Copyright (C) 2012 Shell Xu
+Copyright (C) 2012-2016 Shell Xu
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

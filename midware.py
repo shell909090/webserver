@@ -9,13 +9,11 @@ from __future__ import absolute_import, division,\
     print_function, unicode_literals
 import re
 import time
-import heapq
 import random
 import pickle
 import string
 import logging
 import unittest
-import functools
 try:
     from urllib import quote, unquote
 except ImportError:
@@ -29,18 +27,25 @@ class Dispatch(object):
         self.urlmap = [[re.compile(i[0]), ] + list(i[1:]) for i in urlmap]
 
     def __call__(self, req):
+        if not hasattr(req, 'url_match'):
+            req.url_match = {}
+        if not hasattr(req, 'url_param'):
+            req.url_param = {}
         for rule in self.urlmap:
-            m = rule[0].match(req.url.path)
+            m = rule[0].match(req.path)
             if not m:
                 continue
-            req.url_match = m.groups()
-            req.url_param = rule[2:]
+            # this make dispatch chain possible.
+            req.path = req.path[len(m.group()):]
+            req.url_match.update(m.groupdict())
+            if len(rule) > 2:
+                req.url_param.update(rule[2])
             return rule[1](req)
         return self.default_handler(req)
 
     @staticmethod
     def default_handler(req):
-        return httputil.response_http(404, body='File Not Found')
+        return httputil.Response.create(404, body='File Not Found')
 
 
 class Cache(object):
@@ -67,8 +72,8 @@ class ObjHeap(object):
 thx for Evan Prodromou <evan@bad.dynu.ca>.
 CAUTION: not satisfy with thread.
     '''
+    import heapq
 
-    @functools.total_ordering
     class __node(object):
 
         def __init__(self, k, v, freq):
@@ -97,35 +102,35 @@ CAUTION: not satisfy with thread.
             n.v = v
             self.freq += 1
             n.freq = self.freq
-            heapq.heapify(self.__heap)
+            self.heapq.heapify(self.__heap)
         else:
             while len(self.__heap) >= self.size:
-                del self.__dict[heapq.heappop(self.__heap).k]
+                del self.__dict[self.heapq.heappop(self.__heap).k]
                 self.freq = 0
                 for n in self.__heap:
                     n.freq = 0
             n = self.__node(k, v, self.freq)
             self.__dict[k] = n
-            heapq.heappush(self.__heap, n)
+            self.heapq.heappush(self.__heap, n)
 
     def __getitem__(self, k):
         n = self.__dict[k]
         self.freq += 1
         n.freq = self.freq
-        heapq.heapify(self.__heap)
+        self.heapq.heapify(self.__heap)
         return n.v
 
     def __delitem__(self, k):
         n = self.__dict[k]
         del self.__dict[k]
         self.__heap.remove(n)
-        heapq.heapify(self.__heap)
+        self.heapq.heapify(self.__heap)
         return n.v
 
     def __iter__(self):
         c = self.__heap[:]
         while len(c):
-            yield heapq.heappop(c).k
+            yield self.heapq.heappop(c).k
         raise StopIteration
 
 

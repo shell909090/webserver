@@ -25,26 +25,32 @@ from template import Template
 
 def url_main(req):
     count = req.session.get('count', 0)
+    logging.info('main path: {}'.format(req.path))
     logging.info('main url count: {}'.format(count))
     logging.info('main url match: {}'.format(req.url_match))
     logging.info('main url param: {}'.format(req.url_param))
-    body = 'main page, count: {}, match: {}, param: {}'.format(
-        count, json.dumps(req.url_match), json.dumps(req.url_param))
+    body = json.dumps({
+        'page': 'main',
+        'path': req.path,
+        'count': count,
+        'match': req.url_match,
+        'param': req.url_param
+    })
     req.session['count'] = count + 1
-    res = httputil.response_http(200, body=body)
+    res = httputil.Response.create(200, body=body)
     return res
 
 
 def url_cached(req):
-    res = httputil.response_http(200, body='cached')
-    res.cache = 0.5
+    res = httputil.Response.create(200, body='cached')
+    res.cache = 0.1
     return res
 
 
 def url_post(req):
     l = str(len(req.readbody()))
     logging.info('test post: {}'.format(l))
-    return httputil.response_http(200, body=l)
+    return httputil.Response.create(200, body=l)
 
 
 class url_path(object):
@@ -84,10 +90,10 @@ class url_path(object):
             with open(filename, 'rb') as fi:
                 for d in httputil.file_source(fi):
                     yield d
-        return httputil.response_http(200, body=on_body)
+        return httputil.Response.create(200, body=on_body)
 
     def __call__(self, req):
-        url_path, real_path = self.calc_path(req.url_match[0])
+        url_path, real_path = self.calc_path(req.path)
         if not path.isdir(real_path):
             return self.file_app(req, real_path)
         for i in self.index_set:
@@ -99,14 +105,19 @@ class url_path(object):
         body = self.tpl.render({
             'namelist': namelist, 'get_stat_str': self.get_stat_str,
             'real_path': real_path, 'url_path': url_path})
-        return httputil.response_http(200, body=body)
+        return httputil.Response.create(200, body=body)
 
+dis_chain = midware.Dispatch((
+    ('/chain2/', url_main, {'param2': 2}),
+))
 dis = midware.Dispatch((
-    ('/test/(.*)', url_main, 'test param'),
-    ('/cached/(.*)', url_cached),
-    ('/post/(.*)', url_post),
-    ('/self/(.*)', url_path('.')),
-    ('/(.*)', url_main, 'main param')))
+    ('/chain', dis_chain, {'param1': 1}),
+    ('/test/', url_main, {'test param': 2}),
+    ('/cached/', url_cached),
+    ('/post/', url_post),
+    ('/self/', url_path('.')),
+    ('/', url_main, {'main param': 1})
+))
 dis = midware.MemoryCache(2)(dis)
 dis = midware.MemorySession(600)(dis)
 
@@ -126,51 +137,84 @@ class TestApp(unittest.TestCase):
         self.ws = httputil.WebServer(dis)
 
     def test_main(self):
-        req = httputil.request_http('/urlmatch')
+        req = httputil.Request.create('/urlmatch')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(
-            resp.body,
-            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            json.loads(resp.body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'urlmatch',
+                'count': 0,
+                'match': {},
+                'param': {'main param': 1}
+            })
         self.assertIn('Set-Cookie', resp.headers)
 
+        req = httputil.Request.create('/urlmatch')
         req.headers['Cookie'] = resp.headers['Set-Cookie']
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(
-            resp.body,
-            b'main page, count: 1, match: ["urlmatch"], param: ["main param"]')
+            json.loads(resp.body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'urlmatch',
+                'count': 1,
+                'match': {},
+                'param': {'main param': 1}
+            })
 
     def test_cached(self):
         for i in range(12):
-            req = httputil.request_http('/cached/{}'.format(int(i/3)))
+            req = httputil.Request.create('/cached/{}'.format(int(i/3)))
             resp = self.ws.http_handler(req)
             self.assertEqual(resp.code, 200)
             self.assertEqual(resp.body, b'cached')
 
-        time.sleep(1)
-        req = httputil.request_http('/cached/abc')
+        time.sleep(0.2)
+        req = httputil.Request.create('/cached/abc')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b'cached')
 
     def test_test(self):
-        req = httputil.request_http('/test/testmatch')
+        req = httputil.Request.create('/test/testmatch')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(
-            resp.body,
-            b'main page, count: 0, match: ["testmatch"], param: ["test param"]'
-        )
+            json.loads(resp.body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'testmatch',
+                'count': 0,
+                'match': {},
+                'param': {'test param': 2}
+            })
+
+    def test_chain(self):
+        req = httputil.Request.create('/chain/chain2/chainmatch')
+        resp = self.ws.http_handler(req)
+        self.assertEqual(resp.code, 200)
+        self.assertEqual(
+            json.loads(resp.body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'chainmatch',
+                'count': 0,
+                'match': {},
+                'param': {'param1': 1, 'param2': 2}
+            })
+        self.assertIn('Set-Cookie', resp.headers)
 
     def test_post(self):
-        req = httputil.request_http('/post/postmatch', body='postinfo')
+        req = httputil.Request.create('/post/postmatch', body='postinfo')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertEqual(resp.body, b'8')
 
     def test_path(self):
-        req = httputil.request_http('/self/')
+        req = httputil.Request.create('/self/')
         resp = self.ws.http_handler(req)
         self.assertEqual(resp.code, 200)
         self.assertIn(b'httputil.py', resp.body)

@@ -8,20 +8,20 @@
 from __future__ import absolute_import, division,\
     print_function, unicode_literals
 import sys
+import json
 import time
 import httputil
 import unittest
-import StringIO
-from gevent import monkey
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
 from contextlib import closing
 
 if sys.version_info.major == 3:
     unicode = str
 else:
     bytes = str
-
-
-monkey.patch_all()
 
 
 def download(url):
@@ -31,12 +31,10 @@ def download(url):
 
 def prepare_apps():
     import apps
-    ws = httputil.WebServer(apps.dis, StringIO.StringIO())
-    from gevent.server import StreamServer
-    ws = StreamServer(('', 18080), ws.handler)
-    import gevent
-    gevent.spawn(ws.serve_forever)
-    time.sleep(1)
+    ws = httputil.WebServer(apps.dis, StringIO())
+    ts = httputil.ThreadServer(('', 18080), ws.handler, poolsize=1)
+    ts.start()
+    time.sleep(0.1)
 
 
 prepare_apps()
@@ -48,15 +46,27 @@ class TestClientApp(unittest.TestCase):
     def test_main(self):
         body = download(self.target + '/urlmatch')
         self.assertEqual(
-            body,
-            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            json.loads(body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'urlmatch',
+                'count': 0,
+                'match': {},
+                'param': {'main param': 1}
+            })
 
     def test_getfile(self):
         with httputil.download(self.target + '/urlmatch').makefile() as f:
             body = f.read()
         self.assertEqual(
-            body,
-            b'main page, count: 0, match: ["urlmatch"], param: ["main param"]')
+            json.loads(body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'urlmatch',
+                'count': 0,
+                'match': {},
+                'param': {'main param': 1}
+            })
 
     def test_cached(self):
         for i in range(12):
@@ -64,16 +74,21 @@ class TestClientApp(unittest.TestCase):
                 self.target + '/cached/{}'.format(int(i/3)))
             self.assertEqual(body, b'cached')
 
-        time.sleep(1)
+        time.sleep(0.2)
         body = download(self.target + '/cached/abc')
         self.assertEqual(body, b'cached')
 
     def test_test(self):
         body = download(self.target + '/test/testmatch')
         self.assertEqual(
-            body,
-            b'main page, count: 0, match: ["testmatch"], param: ["test param"]'
-        )
+            json.loads(body.decode('utf-8')),
+            {
+                'page': 'main',
+                'path': 'testmatch',
+                'count': 0,
+                'match': {},
+                'param': {'test param': 2}
+            })
 
     def test_post(self):
         with open('httputil.py', 'rb') as fi:
@@ -94,25 +109,10 @@ class TestClientApp(unittest.TestCase):
             data = fi.read()
         self.assertEqual(body, str(len(data)).encode(httputil.ENCODING))
 
-    @staticmethod
-    def upload(url):
-        host, port, uri = httputil.parseurl(url)
-        req = httputil.request_http(uri, 'POST')
-        req.remote = (host, port)
-        req['Host'] = host
-        req['Transfer-Encoding'] = 'chunked'
-        stream = httputil.connector(req.remote)
-        try:
-            req.send_header(stream)
-            return httputil.RequestWriteFile(stream)
-        except:
-            stream.close()
-            raise
-
     def test_upload(self):
         with open('httputil.py', 'rb') as fi:
             data = fi.read()
-        with self.upload(self.target + '/post/postmatch') as f:
+        with httputil.upload(self.target + '/post/postmatch') as f:
             f.write(data)
         with closing(f.get_response()) as resp:
             self.assertEqual(
@@ -125,16 +125,16 @@ class TestClientApp(unittest.TestCase):
 
 
 def prepare_webpy():
-    import app_webpy
+    try:
+        import app_webpy
+    except ImportError:
+        global TestClientWebpy
+        TestClientWebpy = None
+        return
     ws = httputil.WSGIServer(app_webpy.app.wsgifunc())
-    from gevent.server import StreamServer
-    ws = StreamServer(('', 18081), ws.handler)
-    import gevent
-    gevent.spawn(ws.serve_forever)
-    time.sleep(1)
-
-
-prepare_webpy()
+    ts = httputil.ThreadServer(('', 18081), ws.handler, poolsize=1)
+    ts.start()
+    time.sleep(0.1)
 
 
 class TestClientWebpy(unittest.TestCase):
@@ -159,3 +159,6 @@ class TestClientWebpy(unittest.TestCase):
     def test_path(self):
         body = download(self.target + '/self/')
         self.assertIn(b'httputil.py', body)
+
+
+prepare_webpy()

@@ -7,66 +7,56 @@
 '''
 from __future__ import absolute_import, division, \
     print_function, unicode_literals
-import time
-import socket
-import signal
+import sys
 import logging
-import utils
 import httputil
-from threading import Thread
+
+if sys.version_info.major == 3:
+    basestring = str
 
 
-class ThreadServer(object):
+LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s]\
+(%(module)s:%(lineno)d): %(message)s'
 
-    def __init__(self, addr, handler, poolsize=10):
-        self.addr, self.poolsize, self.go = addr, poolsize, True
-        self.handler = handler
 
-    def run(self):
-        while self.go:
-            try:
-                self.handler(*self.listensock.accept())
-            except KeyboardInterrupt:
-                break
-            except Exception:
-                pass
+def initlog(lv, logfile=None, stream=None, longdate=False):
+    if logfile and logfile.startswith('syslog:'):
+        from logging import handlers
+        handler = handlers.SysLogHandler(logfile[7:])
+    elif logfile:
+        handler = logging.FileHandler(logfile)
+    elif stream:
+        handler = logging.StreamHandler(stream)
+    else:
+        handler = logging.StreamHandler(sys.stderr)
 
-    siglist = [signal.SIGTERM, signal.SIGINT]
+    datefmt = '%H:%M:%S'
+    if longdate:
+        datefmt = '%Y-%m-%d %H:%M:%S'
+    handler.setFormatter(logging.Formatter(LOGFMT, datefmt))
 
-    def signal_handler(self, signum, frame):
-        if signum in self.siglist:
-            self.go = False
-            raise KeyboardInterrupt()
+    logger = logging.getLogger()
+    if isinstance(lv, basestring):
+        lv = getattr(logging, lv)
 
-    def serve_forever(self):
-        logging.info('WebServer started at %s:%d' % self.addr)
-        self.listensock = socket.socket()
-        self.listensock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.listensock.bind(self.addr)
-        self.listensock.listen(10000)
+    logger.setLevel(lv)
+    logger.addHandler(handler)
 
-        try:
-            for si in self.siglist:
-                signal.signal(si, self.signal_handler)
-            self.pool = [Thread(target=self.run)
-                         for _ in range(self.poolsize)]
-            for th in self.pool:
-                th.setDaemon(1)
-            for th in self.pool:
-                th.start()
-            while True:
-                time.sleep(1000)
-            for th in self.pool:
-                th.join()
-        finally:
-            logging.info('system exit')
-            self.listensock.close()
+
+def getcfg(cfgpathes):
+    try:
+        from ConfigParser import SafeConfigParser
+    except ImportError:
+        from configparser import SafeConfigParser
+    cp = SafeConfigParser()
+    cp.read(cfgpathes)
+    return cp
 
 
 def main():
-    cfg = utils.getcfg([
+    cfg = getcfg([
         'serve.conf', '~/.webserver/serve.conf', '/etc/webserver/serve.conf'])
-    utils.initlog(cfg.get('log', 'loglevel'), cfg.get('log', 'logfile'))
+    initlog(cfg.get('log', 'loglevel'), cfg.get('log', 'logfile'))
     addr = (cfg.get('main', 'addr'), cfg.getint('main', 'port'))
 
     engine = cfg.get('server', 'engine')
@@ -85,7 +75,7 @@ def main():
         from gevent.server import StreamServer
         ws = StreamServer(addr, ws.handler)
     elif server == 'thread':
-        ws = ThreadServer(addr, ws.handler)
+        ws = httputil.ThreadServer(addr, ws.handler)
     else:
         raise Exception('invaild server %s' % server)
 

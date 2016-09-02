@@ -11,10 +11,20 @@ import sys
 import socket
 import logging
 import datetime
+import threading
 try:
     from urlparse import urlparse
 except ImportError:
     from urllib.parse import urlparse
+
+
+__all__ = [
+    'ENCODING', 'CHUNK_MIN', 'BUFSIZE', 'CODE_NOBODY', 'DEFAULT_PAGES',
+    'file_source', 'chunked', 'BufferedFile', 'HttpMessage', 'Request',
+    'RequestWriteFile', 'ResponseFile', 'Response', 'connector', 'download',
+    'upload', 'ThreadServer', 'WebServer', 'WSGIServer'
+]
+
 
 if sys.version_info.major == 3:
     unicode = str
@@ -25,6 +35,7 @@ ENCODING = 'utf-8'
 CHUNK_MIN = 1024
 BUFSIZE = 8192
 CODE_NOBODY = [100, 101, 204, 304]
+
 DEFAULT_PAGES = {
     100: ('Continue', 'Request received, please continue'),
     101: ('Switching Protocols',
@@ -86,29 +97,6 @@ def file_source(stream, size=BUFSIZE):
     while data:
         yield data
         data = stream.read(size)
-
-
-def chunked_body(stream):
-    chunk = stream.readline().decode(ENCODING).rstrip().split(';')
-    chunk_size = int(chunk[0], 16)
-    while chunk_size:
-        data = stream.read(chunk_size + 2)
-        if not data:
-            raise EOFError
-        data = data[:-2]
-        if not data:
-            break
-        yield data
-        chunk = stream.readline().decode(ENCODING).rstrip().split(';')
-        chunk_size = int(chunk[0], 16)
-
-
-def length_body(stream, length):
-    for i in range(0, length, BUFSIZE):
-        data = stream.read(min(length - i, BUFSIZE))
-        if not data:
-            raise EOFError
-        yield data
 
 
 def chunked(f):
@@ -217,10 +205,31 @@ class HttpMessage(object):
     def beforesend(self):
         self['Connection'] = 'keep-alive' if self.keepalive else 'close'
 
+    def recv_length_body(self):
+        for i in range(0, self.length, BUFSIZE):
+            data = self.stream.read(min(self.length - i, BUFSIZE))
+            if not data:
+                raise EOFError
+            yield data
+
+    def recv_chunked_body(self):
+        while True:
+            chunk = self.stream.readline().decode(ENCODING).rstrip().split(';')
+            chunk_size = int(chunk[0], 16)
+            if not chunk_size:
+                return
+            data = self.stream.read(chunk_size+2)
+            if not data:
+                raise EOFError
+            data = data[:-2]
+            if not data:
+                break
+            yield data
+
     @classmethod
     def recvfrom(cls, stream, sock=None):
         line = stream.readline().strip()
-        if len(line) == 0:
+        if not line:
             raise EOFError()
         r = line.decode(ENCODING).split(' ', 2)
         if len(r) < 2:
@@ -231,11 +240,11 @@ class HttpMessage(object):
         msg.recv_header(stream)
         msg.stream, msg.sock = stream, sock
         if msg.get('Transfer-Encoding', 'identity') != 'identity':
-            msg.body = chunked_body(stream)
+            msg.body = msg.recv_chunked_body()
             logging.debug('recv body on chunk mode')
         elif 'Content-Length' in msg:
             msg.length = int(msg['Content-Length'])
-            msg.body = length_body(stream, msg.length)
+            msg.body = msg.recv_length_body()
             logging.debug('recv body on length mode, size: %s', msg.length)
         elif msg.hasbody():
             msg.body = file_source(stream)
@@ -307,19 +316,19 @@ class Request(HttpMessage):
     def hasbody(self):
         return False
 
-
-def request_http(uri, method=None, version=None, headers=None, body=None):
-    if not method:
-        method = 'GET' if body is None else 'POST'
-    if not version:
-        version = 'HTTP/1.1'
-    req = Request(method, uri, version)
-    req.header_from_dict(headers)
-    if isinstance(body, unicode):
-        body = body.encode(ENCODING)
-    if body:
-        req.body = body
-    return req
+    @classmethod
+    def create(cls, uri, method=None, version=None, headers=None, body=None):
+        if not method:
+            method = 'GET' if body is None else 'POST'
+        if not version:
+            version = 'HTTP/1.1'
+        req = cls(method, uri, version)
+        req.header_from_dict(headers)
+        if isinstance(body, unicode):
+            body = body.encode(ENCODING)
+        if body:
+            req.body = body
+        return req
 
 
 class RequestWriteFile(FileBase):
@@ -340,53 +349,6 @@ class RequestWriteFile(FileBase):
         return Response.recvfrom(self.stream)
 
 
-class Response(HttpMessage):
-    direction = '< '
-
-    def __init__(self, version, code, phrase):
-        HttpMessage.__init__(self)
-        self.version, self.code, self.phrase = version, int(code), phrase
-
-    def __nonzero__(self):
-        return self.keepalive
-
-    def close(self):
-        return self.stream.close()
-
-    def get_startline(self):
-        return ' '.join((self.version, str(self.code), self.phrase))
-
-    def hasbody(self):
-        return self.code not in CODE_NOBODY
-
-    def makefile(self):
-        return ResponseFile(self)
-
-
-def response_http(code, phrase=None, version=None,
-                  headers=None, body=None):
-    if not phrase:
-        phrase = DEFAULT_PAGES[code][0]
-    if not version:
-        version = 'HTTP/1.1'
-    res = Response(version, code, phrase)
-    res.header_from_dict(headers)
-    if isinstance(body, unicode):
-        body = body.encode(ENCODING)
-    if body:
-        res.body = body
-    return res
-
-
-def response_to(req, code, phrase=None, headers=None, body=None):
-    res = response_http(
-        code, phrase=phrase, version=req.version,
-        headers=headers, body=body)
-    res.keepalive = req.keepalive
-    res.sendto(req.stream)
-    return res
-
-
 class ResponseFile(FileBase):
 
     def __init__(self, resp):
@@ -399,6 +361,111 @@ class ResponseFile(FileBase):
         return int(self.resp.code)
 
 
+class Response(HttpMessage):
+    direction = '< '
+
+    def __init__(self, version, code, phrase):
+        HttpMessage.__init__(self)
+        self.version, self.code, self.phrase = version, int(code), phrase
+
+    def __nonzero__(self):
+        return self.keepalive
+
+    def close(self):
+        if hasattr(self, 'stream'):
+            return self.stream.close()
+
+    def get_startline(self):
+        return ' '.join((self.version, str(self.code), self.phrase))
+
+    def hasbody(self):
+        return self.code not in CODE_NOBODY
+
+    def makefile(self):
+        return ResponseFile(self)
+
+    @classmethod
+    def create(cls, code, phrase=None, version=None, headers=None, body=None):
+        if not phrase:
+            phrase = DEFAULT_PAGES[code][0]
+        if not version:
+            version = 'HTTP/1.1'
+        res = cls(version, code, phrase)
+        res.header_from_dict(headers)
+        if isinstance(body, unicode):
+            body = body.encode(ENCODING)
+        if body:
+            res.body = body
+        return res
+
+
+# ================== client part ==================
+
+
+def connector(addr):
+    s = socket.socket()
+    s.connect(addr)
+    stream = s.makefile('rwb')
+    # You need to close all files and socket to really close the socket.
+    s.close()
+    return stream
+
+# class SocketPool(object):
+
+#     def __init__(self, max_addr=-1):
+#         self._lock = threading.RLock()
+#         self.buf, self.max_addr = {}, max_addr
+
+#     def setmax(self, max_addr=-1):
+#         self.max_addr = max_addr
+
+#     def __call__(self, addr):
+#         host = addr[0]
+#         addr = (socket.gethostbyname(host), addr[1])
+#         stream = None
+#         with self._lock:
+#             if self.buf.get(addr):
+#                 stream = self.buf[addr].pop(0)
+#                 logging.debug(
+#                     'acquire conn %s:%d size %d',
+#                     host, addr[1], len(self.buf[addr]))
+#         if stream is None:
+#             logging.debug('create new conn: %s:%d', host, addr[1])
+#             stream = connect_addr(addr)
+#             stream._close = stream.close
+#             stream.close = lambda: self.release(stream)
+#         return stream
+
+#     def release(self, stream):
+#         try:
+#             addr = stream._sock.getpeername()
+#         except socket.error:
+#             logging.debug('free conn.')
+#             return
+#         with self._lock:
+#             self.buf.setdefault(addr, [])
+#             if self.max_addr < 0 or len(self.buf[addr]) < self.max_addr:
+#                 self.buf[addr].append(stream)
+#                 logging.debug(
+#                     'release conn %s:%d back size %d',
+#                     addr[0], addr[1], len(self.buf[addr]))
+#                 return
+#         logging.debug('free conn %s:%d.', addr[0], addr[1])
+#         stream._close()
+
+# connector = SocketPool()
+
+
+# In Python2, close of req.stream will not harm for resp.stream.read.
+# But in python3, it not work. So leave req.stream there. Use resp.close
+# to close stream.
+def round_trip(req):
+    req.stream = connector(req.remote)
+    req.sendto(req.stream)
+    req.stream.flush()
+    return Response.recvfrom(req.stream)
+
+
 def parseurl(url):
     u = urlparse(url)
     uri = u.path
@@ -409,6 +476,96 @@ def parseurl(url):
     else:
         host, port = u.netloc.split(':', 1)
     return host, int(port), uri
+
+
+def download(url, method=None, headers=None, data=None):
+    host, port, uri = parseurl(url)
+    if not uri:
+        uri = '/'
+    req = Request.create(uri, method, headers=headers, body=data)
+    req.remote = (host, port)
+    req['Host'] = host
+    return round_trip(req)
+
+
+def upload(url, method='POST', headers=None):
+    host, port, uri = parseurl(url)
+    if not uri:
+        uri = '/'
+    req = Request.create(uri, method, headers=headers)
+    req.remote = (host, port)
+    req['Host'] = host
+    req['Transfer-Encoding'] = 'chunked'
+    stream = connector(req.remote)
+    try:
+        req.send_header(stream)
+        return RequestWriteFile(stream)
+    except:
+        stream.close()
+        raise
+
+
+# ================== server part ==================
+
+
+class ThreadServer(object):
+    MAX_CONN = 10000
+    import signal
+
+    def __init__(self, addr, handler, poolsize=2):
+        self.go = True
+        self.addr = addr
+        self.poolsize = poolsize
+        self.handler = handler
+
+    def run(self):
+        try:
+            while self.go:
+                sock, addr = self.listen_socket.accept()
+                self.handler(sock, addr)
+        except KeyboardInterrupt:
+            return
+        except Exception:
+            logging.exception('unknown')
+
+    siglist = [signal.SIGTERM, signal.SIGINT]
+
+    def signal_handler(self, signum, frame):
+        if signum in self.siglist:
+            self.go = False
+            raise KeyboardInterrupt()
+
+    def start(self):
+        logging.info('WebServer started at %s:%d', self.addr)
+        self.listen_socket = socket.socket()
+        try:
+            self.listen_socket.setsockopt(
+                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.listen_socket.bind(self.addr)
+            self.listen_socket.listen(self.MAX_CONN)
+            for si in self.siglist:
+                self.signal.signal(si, self.signal_handler)
+            self.pool = []
+            for _ in range(self.poolsize):
+                th = threading.Thread(target=self.run)
+                th.setDaemon(1)
+                th.start()
+                self.pool.append(th)
+        except Exception:
+            self.listen_socket.close()
+            raise
+
+    def join(self):
+        for th in self.pool:
+            th.join()
+
+    def serve_forever(self):
+        self.start()
+        try:
+            self.join()
+        finally:
+            logging.info('system exit')
+            self.listen_socket.close()
 
 
 class WebServer(object):
@@ -440,33 +597,30 @@ class WebServer(object):
 
     def http_handler(self, req):
         req.url = urlparse(req.uri)
-        res = self.application(req)
-        if res is None:
-            res = response_http(500, body='service internal error')
-        return res
+        req.path = req.url.path
+        return self.application(req)
 
     def handler(self, sock, addr):
+        # You need to close all files and socket to really close the socket.
         stream, res = sock.makefile('rwb'), True
+        sock.close()
         try:
             while res:
                 req, res = None, None
                 try:
-                    try:
-                        req = Request.recvfrom(stream)
-                    except EOFError:
-                        break
-                    req.remote = addr
+                    req = Request.recvfrom(stream)
+                except (EOFError, socket.error):
+                    break
+                req.remote = addr
+                try:
                     res = self.http_handler(req)
                     res.sendto(req.stream)
                 finally:
-                    if req:
-                        if res is True:
-                            res = None
-                        self.record_access(req, res, addr)
+                    self.record_access(req, res, addr)
         except Exception:
             logging.exception('unknown')
         finally:
-            sock.close()
+            stream.close()
 
 
 class WSGIServer(WebServer):
@@ -490,7 +644,7 @@ class WSGIServer(WebServer):
         req.url = urlparse(req.uri)
         env = self.req2env(req)
 
-        res = response_http(500)
+        res = Response.create(500)
 
         def start_response(status, headers):
             r = status.split(' ', 1)
@@ -516,34 +670,3 @@ class WSGIServer(WebServer):
                 for b in req.body:
                     pass
         return res
-
-
-def connect_addr(addr):
-    s = socket.socket()
-    s.connect(addr)
-    return s.makefile('rwb')
-
-connector = connect_addr
-
-
-# In Python2, close of req.stream will not harm for resp.stream.read.
-# But in python3, it not work. So leave req.stream there. Use resp.close
-# to close stream.
-def round_trip(req):
-    try:
-        req.stream = connector(req.remote)
-    except IOError:
-        return response_to(req, 502)
-    req.sendto(req.stream)
-    req.stream.flush()
-    return Response.recvfrom(req.stream)
-
-
-def download(url, method=None, headers=None, data=None):
-    host, port, uri = parseurl(url)
-    if not uri:
-        uri = '/'
-    req = request_http(uri, method, headers=headers, body=data)
-    req.remote = (host, port)
-    req['Host'] = host
-    return round_trip(req)
