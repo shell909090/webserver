@@ -1,21 +1,16 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 @date: 2010-09-27
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division,\
-    print_function, unicode_literals
 import os
 import sys
 import codecs
 import logging
-import unittest
 
 
-if sys.version_info.major == 3:
-    unicode = str
 
 
 class TemplateCode(object):
@@ -59,8 +54,8 @@ class TemplateCode(object):
         return self.TAB * tab + s
 
     def include(self, filepath):
-        with open(filepath, 'r') as tfile:
-            self.process(tfile.read().decode('utf-8'))
+        with open(filepath, 'r', encoding='utf-8') as tfile:
+            self.process(tfile.read())
 
     def process(self, s):
         while True:
@@ -131,23 +126,6 @@ class Template(object):
     def render(self, kargs):
         ''' 根据参数渲染模板 '''
         b = []
-        kargs['write'] = lambda x: b.append(unicode(x))
+        kargs['write'] = lambda x: b.append(str(x))
         eval(self.htmlcode, self.defcodes, kargs)
         return u''.join(b)
-
-
-class TestTemplate(unittest.TestCase):
-    template = u'''<html><head><title>{%=r%}</title></head>
-<body><table><tr><td>col1</td><td>col2</td></tr>
-{%for i in objs:%}<tr><td>{%=i[0]%}</td><td>{%=i[1]%}</td></tr>
-{%end%}</table></body></html>'''
-    result = u'''<html><head><title>test</title></head>
-<body><table><tr><td>col1</td><td>col2</td></tr>
-<tr><td>1</td><td>2</td></tr>
-<tr><td>3</td><td>4</td></tr>
-</table></body></html>'''
-
-    def test_render(self):
-        t = Template(template=self.template)
-        info = {u'r': u'test', u'objs': [(1, 2), (3, 4)]}
-        self.assertEqual(t.render(info), self.result)

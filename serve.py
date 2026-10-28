@@ -1,18 +1,16 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 @date: 2012-09-03
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division, \
-    print_function, unicode_literals
 import sys
+from pathlib import Path
+from configparser import ConfigParser
 import logging
 import httputil
 
-if sys.version_info.major == 3:
-    basestring = str
 
 
 LOGFMT = '%(asctime)s.%(msecs)03d[%(levelname)s]\
@@ -36,7 +34,7 @@ def initlog(lv, logfile=None, stream=None, longdate=False):
     handler.setFormatter(logging.Formatter(LOGFMT, datefmt))
 
     logger = logging.getLogger()
-    if isinstance(lv, basestring):
+    if isinstance(lv, str):
         lv = getattr(logging, lv)
 
     logger.setLevel(lv)
@@ -44,12 +42,8 @@ def initlog(lv, logfile=None, stream=None, longdate=False):
 
 
 def getcfg(cfgpathes):
-    try:
-        from ConfigParser import SafeConfigParser
-    except ImportError:
-        from configparser import SafeConfigParser
-    cp = SafeConfigParser()
-    cp.read(cfgpathes)
+    cp = ConfigParser()
+    cp.read([str(Path(p).expanduser()) for p in cfgpathes])
     return cp
 
 

@@ -3,3 +3,11 @@ sessions
 TAGS
 tags
 .coverage
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+sessions/
+
+.ruff_cache/

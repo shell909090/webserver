@@ -1,19 +1,16 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 @date: 2013-12-30
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division,\
-    print_function, unicode_literals
 import os
 import copy
 import stat
 import httputil
-import urllib
+from urllib.parse import unquote
 import logging
-import unittest
 from os import path
 import web
 from template import Template
@@ -22,8 +19,8 @@ from template import Template
 class Main(object):
 
     def GET(self, name):
-        logging.info('main url count: {}', session.count)
-        logging.info('main url match: {}', name)
+        logging.info('main url count: %s', session.count)
+        logging.info('main url match: %s', name)
         body = 'main page, count: {}, match: {}'.format(
             session.count, name)
         session.count += 1
@@ -34,7 +31,7 @@ class Post(object):
 
     def POST(self, name):
         l = str(len(web.data()))
-        logging.info('test post: {}', l)
+        logging.info('test post: %s', l)
         return str(l)
 
 
@@ -65,7 +62,7 @@ class Path(object):
         return ''.join([s for f, s in stat_map if f(mode)])
 
     def GET(self, filepath):
-        url_path = urllib.unquote(filepath)
+        url_path = unquote(filepath)
         real_path = path.join(self.basedir, url_path.lstrip('/'))
         real_path = path.abspath(path.realpath(real_path))
         if not real_path.startswith(self.basedir):
@@ -95,24 +92,3 @@ app = web.application((
 
 session = web.session.Session(
     app, web.session.DiskStore('sessions'), initializer={'count': 0})
-
-
-class TestAppWebpy(unittest.TestCase):
-
-    def test_main(self):
-        resp = app.request('/urlmatch')
-        self.assertEqual(resp.status, '200 OK')
-        self.assertEqual(
-            resp.data,
-            b'main page, count: 0, match: urlmatch')
-        self.assertIn('Set-Cookie', resp.headers)
-
-    def test_post(self):
-        resp = app.request('/post/postmatch', method='POST', data='postinfo')
-        self.assertEqual(resp.status, '200 OK')
-        self.assertEqual(resp.data, '8')
-
-    def test_path(self):
-        resp = app.request('/self/')
-        self.assertEqual(resp.status, '200 OK')
-        self.assertIn('httputil.py', resp.data)

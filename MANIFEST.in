@@ -1,0 +1,2 @@
+include serve.conf uv.lock
+recursive-include tests *.py

@@ -1,47 +1,64 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
-'''
-@date: 2013-10-17
-@author: shell.xu
-@license: BSD-3-clause
-'''
-from __future__ import absolute_import, division,\
-    print_function, unicode_literals
-import sys
 import json
 import time
-import httputil
 import unittest
-try:
-    from StringIO import StringIO
-except ImportError:
-    from io import StringIO
 from contextlib import closing
+from multiprocessing import Pipe, Process
+import importlib.util
+import httputil
 
-if sys.version_info.major == 3:
-    unicode = str
-else:
-    bytes = str
+
+def run_server(connection, engine):
+    if engine == "apps":
+        import apps
+        server = httputil.WebServer(apps.dis)
+    else:
+        import app_webpy
+        server = httputil.WSGIServer(app_webpy.app.wsgifunc())
+    listener = httputil.ThreadServer(("127.0.0.1", 0), server.handler)
+    listener.start()
+    connection.send(listener.listen_socket.getsockname()[1])
+    connection.close()
+    try:
+        listener.join()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        listener.listen_socket.close()
+
+
+class HTTPTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if cls.engine == "wsgi" and importlib.util.find_spec("web") is None:
+            raise unittest.SkipTest("web.py extra is not installed")
+        parent, child = Pipe()
+        cls.server = Process(target=run_server, args=(child, cls.engine))
+        cls.server.start()
+        child.close()
+        cls.addClassCleanup(cls.stop_server)
+        try:
+            if not parent.poll(10):
+                raise RuntimeError("HTTP test server startup timed out")
+            cls.target = "http://127.0.0.1:" + str(parent.recv())
+        finally:
+            parent.close()
+
+    @classmethod
+    def stop_server(cls):
+        cls.server.terminate()
+        cls.server.join(3)
+        if cls.server.is_alive():
+            cls.server.kill()
+            cls.server.join()
 
 
 def download(url):
-    with closing(httputil.download(url)) as resp:
-        return resp.readbody()
+    with closing(httputil.download(url)) as response:
+        return response.readbody()
 
 
-def prepare_apps():
-    import apps
-    ws = httputil.WebServer(apps.dis, StringIO())
-    ts = httputil.ThreadServer(('', 18080), ws.handler, poolsize=1)
-    ts.start()
-    time.sleep(0.1)
-
-
-prepare_apps()
-
-
-class TestClientApp(unittest.TestCase):
-    target = 'http://localhost:18080'
+class TestClientApp(HTTPTestCase):
+    engine = "apps"
 
     def test_main(self):
         body = download(self.target + '/urlmatch')
@@ -124,21 +141,8 @@ class TestClientApp(unittest.TestCase):
         self.assertIn(b'httputil.py', body)
 
 
-def prepare_webpy():
-    try:
-        import app_webpy
-    except ImportError:
-        global TestClientWebpy
-        TestClientWebpy = None
-        return
-    ws = httputil.WSGIServer(app_webpy.app.wsgifunc())
-    ts = httputil.ThreadServer(('', 18081), ws.handler, poolsize=1)
-    ts.start()
-    time.sleep(0.1)
-
-
-class TestClientWebpy(unittest.TestCase):
-    target = 'http://localhost:18081'
+class TestClientWebpy(HTTPTestCase):
+    engine = "wsgi"
 
     def test_main(self):
         body = download(self.target + '/urlmatch')
@@ -160,5 +164,3 @@ class TestClientWebpy(unittest.TestCase):
         body = download(self.target + '/self/')
         self.assertIn(b'httputil.py', body)
 
-
-prepare_webpy()

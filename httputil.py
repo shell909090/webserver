@@ -1,21 +1,16 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 @date: 2012-04-26
 @author: shell.xu
 @license: BSD-3-clause
 '''
-from __future__ import absolute_import, division,\
-    print_function, unicode_literals
 import sys
 import socket
 import logging
 import datetime
 import threading
-try:
-    from urlparse import urlparse
-except ImportError:
-    from urllib.parse import urlparse
+from urllib.parse import urlparse
 
 
 __all__ = [
@@ -26,10 +21,6 @@ __all__ = [
 ]
 
 
-if sys.version_info.major == 3:
-    unicode = str
-else:
-    bytes = str
 
 ENCODING = 'utf-8'
 CHUNK_MIN = 1024
@@ -184,7 +175,7 @@ class HttpMessage(object):
             line = line.strip()
             if not line:
                 break
-            if line[0] not in (' ', '\t'):
+            if line[:1] not in (b' ', b'\t'):
                 h, v = line.decode(ENCODING).split(':', 1)
                 self.add(h.strip(), v.strip())
             else:
@@ -262,11 +253,12 @@ class HttpMessage(object):
         return self.body
 
     def readform(self):
-        return dict(i.split('=', 1) for i in self.readbody().split('&'))
+        from urllib.parse import parse_qsl
+        return dict(parse_qsl(self.readbody().decode(ENCODING), keep_blank_values=True))
 
     def set_body(self):
-        if isinstance(self.body, unicode):
-            raise TypeError('body is an unicode, bytes excepted.')
+        if isinstance(self.body, str):
+            raise TypeError('body is an str, bytes excepted.')
         if hasattr(self.body, 'read'):  # transfer file to chunk
             self.body = file_source(self.body)
         elif isinstance(self.body, bytes):
@@ -324,7 +316,7 @@ class Request(HttpMessage):
             version = 'HTTP/1.1'
         req = cls(method, uri, version)
         req.header_from_dict(headers)
-        if isinstance(body, unicode):
+        if isinstance(body, str):
             body = body.encode(ENCODING)
         if body:
             req.body = body
@@ -337,8 +329,8 @@ class RequestWriteFile(FileBase):
         self.stream = stream
 
     def write(self, s):
-        if isinstance(s, unicode):
-            s = s.decode(ENCODING)
+        if isinstance(s, str):
+            s = s.encode(ENCODING)
         self.stream.write(b'%x\r\n%s\r\n' % (len(s), s,))
 
     def close(self):
@@ -368,7 +360,7 @@ class Response(HttpMessage):
         HttpMessage.__init__(self)
         self.version, self.code, self.phrase = version, int(code), phrase
 
-    def __nonzero__(self):
+    def __bool__(self):
         return self.keepalive
 
     def close(self):
@@ -392,7 +384,7 @@ class Response(HttpMessage):
             version = 'HTTP/1.1'
         res = cls(version, code, phrase)
         res.header_from_dict(headers)
-        if isinstance(body, unicode):
+        if isinstance(body, str):
             body = body.encode(ENCODING)
         if body:
             res.body = body
@@ -548,7 +540,7 @@ class ThreadServer(object):
             self.pool = []
             for _ in range(self.poolsize):
                 th = threading.Thread(target=self.run)
-                th.setDaemon(1)
+                th.daemon = True
                 th.start()
                 self.pool.append(th)
         except Exception:
@@ -576,7 +568,7 @@ class WebServer(object):
             return
         if accesslog == '':
             self.accessfile = sys.stdout
-        elif isinstance(accesslog, unicode):
+        elif isinstance(accesslog, str):
             self.accessfile = open(accesslog, 'a')
         else:
             self.accessfile = accesslog

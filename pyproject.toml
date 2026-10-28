@@ -1,0 +1,21 @@
+[project]
+name = "webserver"
+version = "0.1.0"
+description = "Educational HTTP server, client and web framework"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+gevent = ["gevent>=26.9.0"]
+webpy = ["web.py>=0.76"]
+
+[project.scripts]
+webserver = "serve:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["serve", "httputil", "apps", "midware", "template", "app_webpy"]
